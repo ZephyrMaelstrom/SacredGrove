@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rootwake · SacredGrove</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #bcc7d1; font-family: system-ui, sans-serif; }
+      #renderCanvas { width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #2f4a2b; color: #e9e4d4;
+                 font-size: 18px; letter-spacing: .04em; transition: opacity .6s; z-index: 10; text-align: center; padding: 24px; }
+      #loading.hidden { opacity: 0; pointer-events: none; }
+      #hud { position: fixed; left: 12px; top: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.62);
+             color: #eef0e6; font-size: 13px; line-height: 1.45; pointer-events: none; min-width: 180px; }
+      #help { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.55);
+              color: #dfe3d6; font-size: 12px; line-height: 1.5; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="renderCanvas"></canvas>
+    <div id="loading">Rootwake<br /><small>loading Cedar Branch Road…</small></div>
+    <div id="hud"></div>
+    <div id="help">Click to look · WASD to walk · Shift to hurry · Z zone overlay<br />On a headset: press the VR button (bottom right)</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
