@@ -6,15 +6,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "tsc --noEmit && vite build",
+    "data": "node scripts/build-data.mjs",
+    "build": "npm run data && tsc --noEmit && vite build",
     "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "census": "tsx scripts/census.ts",
+    "report:habitat": "tsx scripts/habitat-report.ts"
   },
   "dependencies": {
     "@babylonjs/core": "^8.56.2"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
+    "read-excel-file": "^9.3.10",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }

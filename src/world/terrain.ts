@@ -1,7 +1,7 @@
 import { Mesh, Scene, StandardMaterial, VertexData, Color3 } from "@babylonjs/core";
-import { MAP, ZONES, type ZoneId, distToDrive, fbm, heightAt, noise2, zoneAt } from "./map";
+import { MAP, SITE, type ZoneId, distToDrive, distToPolyline, fbm, heightAt, noise2, zoneAt } from "./map";
 
-type RGB = [number, number, number];
+export type RGB = [number, number, number];
 
 const mix = (a: RGB, b: RGB, t: number): RGB => [
   a[0] + (b[0] - a[0]) * t,
@@ -56,8 +56,14 @@ function naturalColor(zone: ZoneId, x: number, z: number): RGB {
 
 export interface Terrain {
   mesh: Mesh;
-  /** Swap between the natural March colours and the zone debug overlay. */
-  setDebugZones(on: boolean): void;
+  /**
+   * Blend the property's ground toward the colour of its vegetation
+   * (3 floats per habitat node; r < 0 = no plant there). Keeps the far view
+   * consistent with the plants: gray goldenrod field, rust remnant, green lawn.
+   */
+  setVegetationTint(tint: Float32Array, amount: number): void;
+  /** Paint property nodes with a debug colour (null = natural ground). */
+  setOverlay(colorOf: ((node: number) => RGB | null) | null): void;
 }
 
 export function createTerrain(scene: Scene): Terrain {
@@ -65,11 +71,17 @@ export function createTerrain(scene: Scene): Terrain {
   const x0 = MAP.renderMinX, z0 = MAP.renderMinZ;
   const nx = Math.round((MAP.renderMaxX - x0) / step) + 1;
   const nz = Math.round((MAP.renderMaxZ - z0) / step) + 1;
+  // Offset from terrain vertices to habitat nodes (both on the same 2 m lattice).
+  const ox = Math.round((MAP.minX - x0) / step), oz = Math.round((MAP.minZ - z0) / step);
+  const hx = Math.round((MAP.maxX - MAP.minX) / step) + 1, hz = Math.round((MAP.maxZ - MAP.minZ) / step) + 1;
+  const nodeOfVertex = (i: number, j: number) => {
+    const a = i - ox, b = j - oz;
+    return a < 0 || b < 0 || a >= hx || b >= hz ? -1 : b * hx + a;
+  };
 
   const positions: number[] = [];
   const indices: number[] = [];
   const natural: number[] = [];
-  const debug: number[] = [];
 
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
@@ -83,23 +95,35 @@ export function createTerrain(scene: Scene): Terrain {
       if (z > 6 && distToDrive(x, z) < 1.9) {
         col = mix([0.52, 0.5, 0.45], [0.6, 0.57, 0.5], noise2(x * 2, z * 2));
       }
+      // The mowed path through the field shows as a shorter, greener stripe.
+      if (z > SITE.yard.z1 - 6 && distToPolyline(x, z, SITE.mowPath) < SITE.mowPathWidth / 2) {
+        col = mix(col, [0.4, 0.46, 0.26], 0.6);
+      }
       natural.push(col[0], col[1], col[2], 1);
-      const d = ZONES[zone].debug;
-      debug.push(d[0], d[1], d[2], 1);
     }
   }
-  // Soften zone borders: one 3x3 box blur over the natural colours.
-  const soft = natural.slice();
-  for (let j = 1; j < nz - 1; j++) {
-    for (let i = 1; i < nx - 1; i++) {
-      for (let ch = 0; ch < 3; ch++) {
-        let sum = 0;
-        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) sum += natural[((j + dj) * nx + (i + di)) * 4 + ch];
-        soft[(j * nx + i) * 4 + ch] = sum / 9;
+  const blur = (src: ArrayLike<number>, stride: number, valid?: (k: number) => boolean) => {
+    const out = Array.from(src);
+    for (let j = 1; j < nz - 1; j++) {
+      for (let i = 1; i < nx - 1; i++) {
+        const k = j * nx + i;
+        if (valid && !valid(k)) continue;
+        for (let ch = 0; ch < 3; ch++) {
+          let sum = 0, cnt = 0;
+          for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+            const kk = (j + dj) * nx + (i + di);
+            if (valid && !valid(kk)) continue;
+            sum += src[kk * stride + ch];
+            cnt++;
+          }
+          out[k * stride + ch] = sum / cnt;
+        }
       }
     }
-  }
-  for (let k = 0; k < soft.length; k++) natural[k] = soft[k];
+    return out;
+  };
+  // Soften zone borders.
+  const base = blur(natural, 4);
 
   for (let j = 0; j < nz - 1; j++) {
     for (let i = 0; i < nx - 1; i++) {
@@ -114,7 +138,7 @@ export function createTerrain(scene: Scene): Terrain {
   vd.positions = positions;
   vd.indices = indices;
   vd.normals = normals;
-  vd.colors = natural;
+  vd.colors = base;
 
   const mesh = new Mesh("ground", scene);
   vd.applyToMesh(mesh, true);
@@ -127,10 +151,40 @@ export function createTerrain(scene: Scene): Terrain {
   mat.specularColor = Color3.Black();
   mesh.material = mat;
 
+  let tinted = base;
   return {
     mesh,
-    setDebugZones(on: boolean) {
-      mesh.setVerticesData("color", on ? debug : natural, true);
+    setVegetationTint(tint: Float32Array, amount: number) {
+      // Expand node tint onto terrain vertices, blur it so single nodes don't speckle.
+      const vtx = new Array(nx * nz * 3).fill(-1);
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const n = nodeOfVertex(i, j);
+        if (n < 0 || tint[n * 3] < 0) continue;
+        const k = (j * nx + i) * 3;
+        vtx[k] = tint[n * 3]; vtx[k + 1] = tint[n * 3 + 1]; vtx[k + 2] = tint[n * 3 + 2];
+      }
+      const soft = blur(vtx, 3, (k) => vtx[k * 3] >= 0);
+      tinted = base.slice();
+      for (let k = 0; k < nx * nz; k++) {
+        if (soft[k * 3] < 0) continue;
+        for (let ch = 0; ch < 3; ch++) tinted[k * 4 + ch] = base[k * 4 + ch] * (1 - amount) + soft[k * 3 + ch] * 0.85 * amount;
+      }
+      mesh.setVerticesData("color", tinted, true);
+    },
+    setOverlay(colorOf) {
+      if (!colorOf) {
+        mesh.setVerticesData("color", tinted, true);
+        return;
+      }
+      const out = tinted.slice();
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const n = nodeOfVertex(i, j);
+        const k = (j * nx + i) * 4;
+        const c = n < 0 ? null : colorOf(n);
+        if (c) { out[k] = c[0]; out[k + 1] = c[1]; out[k + 2] = c[2]; }
+        else { const g = (out[k] + out[k + 1] + out[k + 2]) / 3 * 0.6; out[k] = out[k + 1] = out[k + 2] = g; }
+      }
+      mesh.setVerticesData("color", out, true);
     },
   };
 }

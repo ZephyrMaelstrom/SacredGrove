@@ -13,15 +13,20 @@
       #loading.hidden { opacity: 0; pointer-events: none; }
       #hud { position: fixed; left: 12px; top: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.62);
              color: #eef0e6; font-size: 13px; line-height: 1.45; pointer-events: none; min-width: 180px; }
+      #hud .dim { color: #c8ccbd; font-size: 12px; }
+      #hud { max-width: 46vw; }
+      #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
+                   background: rgba(255,255,255,.75); box-shadow: 0 0 0 1px rgba(0,0,0,.35); pointer-events: none; }
       #help { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.55);
               color: #dfe3d6; font-size: 12px; line-height: 1.5; pointer-events: none; }
     </style>
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="loading">Rootwake<br /><small>loading Cedar Branch Road…</small></div>
+    <div id="loading">Rootwake<br /><small>Cedar Branch Road</small><br /><small id="loadingStatus">loading…</small></div>
+    <div id="crosshair"></div>
     <div id="hud"></div>
-    <div id="help">Click to look · WASD to walk · Shift to hurry · Z zone overlay<br />On a headset: press the VR button (bottom right)</div>
+    <div id="help">Click to look · WASD walk · Shift hurry · aim at a plant to identify it<br />Z habitat overlays · X where this plant can grow · [ ] ±1 week · , . ±1 day · V vegetation on/off · F fly (Q/E down/up)<br />On a headset: press the VR button (bottom right)</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -35,7 +35,40 @@ const PALETTE = {
 
 export class Builder {
   private mats = new Map<string, StandardMaterial>();
+  /** Every mesh made, with whether it casts shadows — merged per material by mergeStatic(). */
+  private made: { mesh: Mesh; cast: boolean }[] = [];
   constructor(public readonly scene: Scene, private shadows?: ShadowGenerator) {}
+
+  /**
+   * Gray-box geometry is hundreds of tiny meshes (every fence post is one).
+   * Merge them per material so the homestead costs a handful of draw calls.
+   * Call once, after everything static has been built.
+   */
+  mergeStatic() {
+    const groups = new Map<string, Mesh[]>();
+    for (const { mesh, cast } of this.made) {
+      if (mesh.isDisposed()) continue;
+      mesh.computeWorldMatrix(true);
+      // Babylon can only merge meshes with identical vertex attributes.
+      const kinds = mesh.getVerticesDataKinds().sort().join(",");
+      const key = `${mesh.material?.name ?? "none"}|${kinds}|${cast}`;
+      const list = groups.get(key) ?? [];
+      list.push(mesh);
+      groups.set(key, list);
+    }
+    for (const [key, meshes] of groups) {
+      if (meshes.length < 2) continue;
+      for (const m of meshes) this.shadows?.removeShadowCaster(m);
+      const merged = Mesh.MergeMeshes(meshes, true, true);
+      if (!merged) continue;
+      merged.name = `static_${key.split("|")[0]}`;
+      merged.receiveShadows = true;
+      merged.isPickable = false;
+      merged.freezeWorldMatrix();
+      if (key.endsWith("true")) this.shadows?.addShadowCaster(merged);
+    }
+    this.made = [];
+  }
 
   mat(key: keyof typeof PALETTE): StandardMaterial {
     let m = this.mats.get(key);
@@ -53,6 +86,7 @@ export class Builder {
     mesh.material = this.mat(mat);
     mesh.receiveShadows = true;
     if (cast) this.shadows?.addShadowCaster(mesh);
+    this.made.push({ mesh, cast });
     return mesh;
   }
 
@@ -74,6 +108,7 @@ export class Builder {
     const vd = new VertexData();
     vd.positions = p;
     vd.indices = idx;
+    vd.uvs = new Array((p.length / 3) * 2).fill(0); // match boxes so they can merge
     const m = new Mesh(name, this.scene);
     vd.applyToMesh(m);
     m.convertToFlatShadedMesh();

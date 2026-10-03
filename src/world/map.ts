@@ -1,8 +1,8 @@
 /**
  * Map 1 — Cedar Branch Road homestead.
  *
- * Pure data + math, no Babylon imports, so the same functions can run in the
- * habitat-simulation Web Worker later (M2).
+ * Pure data + math, no Babylon imports, so the same functions run in the
+ * habitat-simulation Web Worker (src/sim) and in the renderer.
  *
  * Coordinates: metres. +X = east, +Z = north, +Y = up.
  * The gravel road runs east–west along the south edge (z ≈ 0–8);
@@ -91,7 +91,49 @@ export const SITE = {
     [-13, 43],
     [7, 46],
   ] as [number, number][],
+  /** A mowed footpath from the yard up through the old pasture to the woods. */
+  mowPath: [
+    [-12, 104],
+    [-8, 180],
+    [2, 260],
+    [-2, 358],
+  ] as [number, number][],
+  mowPathWidth: 2.6,
+  /** Raised beds east of the house (bottom-left corners are not used; centres). */
+  raisedBeds: [
+    [-30, 74],
+    [-27.6, 74],
+    [-25.2, 74],
+    [-22.8, 74],
+  ] as [number, number][],
+  manurePile: { x: 50, z: 76, r: 2 },
+  /** Open-grown yard trees: position and summer crown radius (m). */
+  yardTrees: [
+    { x: -54, z: 52, crown: 9, species: "whiteOak" },
+    { x: -27, z: 27, crown: 6, species: "sugarMaple" },
+  ],
+  /** Red cedar windbreak behind (north of) the barn. */
+  windbreak: { x0: -4, x1: 18.5, z: 84, crown: 2.2 },
+  /** Fallen logs along the forest edge: host wood for fungi. */
+  logs: [
+    { x: -48, z: 366, len: 7, rotY: 0.3, dia: 0.5 },
+    { x: -9, z: 368, len: 5, rotY: -0.6, dia: 0.4 },
+    { x: 31, z: 364, len: 8, rotY: 1.2, dia: 0.6 },
+    { x: 58, z: 367, len: 6, rotY: 0.1, dia: 0.45 },
+  ],
 } as const;
+
+/** Distance from (x, z) to a polyline. */
+export function distToPolyline(x: number, z: number, pts: readonly (readonly [number, number])[]): number {
+  let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    const dx = bx - ax, dz = bz - az;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    best = Math.min(best, Math.hypot(ax + t * dx - x, az + t * dz - z));
+  }
+  return best;
+}
 
 /** Which zone a ground point belongs to. */
 export function zoneAt(x: number, z: number): ZoneId {
@@ -116,7 +158,7 @@ export function zoneAt(x: number, z: number): ZoneId {
 
 // ---------------------------------------------------------------- terrain
 
-const smooth = (e0: number, e1: number, v: number) => {
+export const smooth = (e0: number, e1: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 };
@@ -138,18 +180,19 @@ export function fbm(x: number, z: number): number {
   return 0.5 * noise2(x, z) + 0.25 * noise2(x * 2.03, z * 2.03) + 0.125 * noise2(x * 4.1, z * 4.1);
 }
 
+/**
+ * Woody cover along a fencerow, 0 (open gap) to 1 (closed canopy). Shared by
+ * the woody-plant placer (where the shrubs and small trees stand) and the
+ * habitat light layer (how much shade they cast), so the two always agree.
+ */
+export function fencerowCanopy(side: -1 | 1, z: number): number {
+  const n = fbm(side * 3.7 + 20, z * 0.045);
+  return smooth(0.36, 0.56, n);
+}
+
 /** Distance from (x, z) to the drive centreline. */
 export function distToDrive(x: number, z: number): number {
-  let best = Infinity;
-  const pts = SITE.drive;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
-    const dx = bx - ax, dz = bz - az;
-    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
-    const px = ax + t * dx - x, pz = az + t * dz - z;
-    best = Math.min(best, Math.hypot(px, pz));
-  }
-  return best;
+  return distToPolyline(x, z, SITE.drive);
 }
 
 /**
