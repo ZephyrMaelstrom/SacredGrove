@@ -1,14 +1,19 @@
 /**
- * The satchel (desktop): what you're carrying, your Field Journal, what's in
- * the barn, and how you're feeling. Tab or J opens it and frees the mouse.
+ * The satchel (desktop): what you're carrying, your Field Journal, the
+ * recipes you've worked out, and your ledger. Tab or J opens it and frees
+ * the mouse.
  */
 import { PLANTS } from "../data/plants";
 import type { Session } from "../game/session";
 import { absDay, formatTime } from "../time/clock";
 import { formatDoy } from "../sim/phenology";
-import type { Lot } from "../game/basket";
+import { isPrep, METHOD_NAMES, type Item } from "../game/items";
+import { herbCondition } from "../game/storage";
+import { money, prepSummary } from "../game/homestead";
+import { effectWord } from "../game/stations";
+import { strengthWord } from "../game/apothecary";
 
-type Tab = "basket" | "journal" | "barn" | "status";
+type Tab = "basket" | "journal" | "recipes" | "ledger";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FORM_WORDS: Record<string, string> = {
   rosette: "rosette", mat: "low creeper", forb: "forb", tallForb: "tall forb", grass: "grass", sedge: "sedge",
@@ -47,8 +52,19 @@ export class Satchel {
     }
   }
 
-  private lotRow(l: Lot, actions: boolean) {
+  /** Open straight to a tab (the writing desk opens the journal). */
+  show(tab: Tab) {
+    this.tab = tab;
+    if (!this.open) this.toggle();
+    else this.render();
+  }
+
+  private lotRow(l: Item, actions: boolean) {
     const s = this.session.state;
+    if (isPrep(l)) {
+      const btns = actions ? `<button data-act="taste" data-id="${esc(l.id)}" class="warn">Taste</button><button data-act="toss" data-id="${esc(l.id)}">Pour out</button>` : "";
+      return `<tr><td><b>${esc(l.name)}</b><br><span class="dim">${esc(prepSummary(l))} · ${esc(l.description)}</span></td><td>${l.volumeMl} ml</td><td></td><td class="acts">${btns}</td></tr>`;
+    }
     const plant = PLANTS.find((p) => p.latin === l.latin);
     const known = !!(plant && s.journal[l.latin]?.identified);
     const age = absDay(s.clock) - l.harvestedDay;
@@ -57,12 +73,12 @@ export class Satchel {
     const btns = actions
       ? `<button data-act="smell" data-id="${esc(l.id)}">Smell</button><button data-act="taste" data-id="${esc(l.id)}" class="warn">Taste</button><button data-act="toss" data-id="${esc(l.id)}">Toss</button>`
       : "";
-    return `<tr><td><b>${esc(name)}</b><br><span class="dim">${esc(l.part)} · picked ${when}</span></td><td>${l.grams} g</td><td>${potencyBar(l.potency)}</td><td class="acts">${btns}</td></tr>`;
+    return `<tr><td><b>${esc(name)}</b><br><span class="dim">${esc(l.part)} · ${herbCondition(l)} · picked ${when}</span></td><td>${l.grams} g</td><td>${potencyBar(Math.round(l.potency))}</td><td class="acts">${btns}</td></tr>`;
   }
 
   render() {
     const s = this.session.state;
-    const tabs = (["basket", "journal", "barn", "status"] as Tab[])
+    const tabs = (["basket", "journal", "recipes", "ledger"] as Tab[])
       .map((t) => `<button data-tab="${t}" class="${t === this.tab ? "on" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("");
     let body = "";
     if (this.tab === "basket") {
@@ -70,20 +86,35 @@ export class Satchel {
         ? `<p class="dim">Basket ${this.session.basketLine()} · Smell and taste a sample to fill in its journal page. Tasting unknown plants is dangerous.</p>
            <table>${s.basket.map((l) => this.lotRow(l, true)).join("")}</table>`
         : `<p class="dim">Your basket is empty. Hold the left mouse button on a plant to harvest it.</p>`;
-    } else if (this.tab === "barn") {
-      body = s.stores.length
-        ? `<p class="dim">Unloaded at the barn. Drying, the root cellar and the apothecary bench come in M6–M7.</p><table>${s.stores.map((l) => this.lotRow(l, false)).join("")}</table>`
-        : `<p class="dim">Nothing in the barn yet. Press E at the barn doors to unload your basket.</p>`;
-    } else if (this.tab === "status") {
+    } else if (this.tab === "recipes") {
+      body = this.recipes();
+    } else if (this.tab === "ledger") {
       const now = this.session.nowAbsMinute;
       const st = s.statuses.filter((x) => x.until > now);
+      const where = Object.entries(s.storage).filter(([, l]) => l.length).map(([k, l]) => `${k} ${l.length}`).join(" · ");
       body = `<p>${formatDoy(s.clock.doy)}, Year ${s.clock.year} · ${formatTime(s.clock.minutes)}</p>
+        <p><b>${money(s.money)}</b> in your pocket · ${money(s.cashBox)} in the stand's cash box · reputation ${Math.round(s.reputation)}/100</p>
         <p>${st.length ? st.map((x) => `<b>${esc(x.label)}</b> — ${duration(x.until - now)} left`).join("<br>") : "You feel fine."}</p>
-        <p class="dim">${s.gloves ? "Wearing gloves." : "Bare-handed (G puts on gloves)."} · ${s.stats.harvests} harvests · ${s.stats.daysPlayed} nights slept</p>`;
+        <p class="dim">${s.gloves ? "Wearing gloves." : "Bare-handed (G puts on gloves)."} · ${s.stats.harvests} harvests · ${s.stats.brews} brews · ${s.stats.sales} sold · ${s.stats.ordersDone} orders filled · ${s.stats.daysPlayed} nights slept${where ? ` · stored: ${where}` : ""}</p>
+        <h3>Ledger</h3>${s.ledger.length ? s.ledger.map((l) => `<p class="dim">Day ${l.day}: ${esc(l.text)}</p>`).join("") : `<p class="dim">Nothing yet.</p>`}`;
     } else {
       body = this.journal();
     }
     this.el.innerHTML = `<div class="satchel-head">${tabs}<button data-act="close" class="close">✕</button></div><div class="satchel-body">${body}</div>`;
+  }
+
+  private recipes() {
+    const list = Object.values(this.session.state.protocols).filter((p) => Object.keys(p.best).length || p.notes.length);
+    if (!list.length) return `<p class="dim">No recipes worked out yet. Brew something at the apothecary bench, then taste it (or have a customer report back) to learn what it does. Single-herb brews teach you the most.</p>`;
+    list.sort((a, b) => Math.max(0, ...Object.values(b.best)) - Math.max(0, ...Object.values(a.best)));
+    return list.map((p) => {
+      const ings = p.ingredients.map((i) => `${esc(i.name)} ${i.share}%`).join(" + ");
+      const eff = Object.entries(p.best).sort((a, b) => b[1] - a[1]).map(([t, v]) => `${strengthWord(v)} ${esc(effectWord(t))}`).join(", ");
+      const how = `${METHOD_NAMES[p.method as keyof typeof METHOD_NAMES] ?? p.method}, ${p.waterMl} ml, ${p.minutes} min${p.method === "hot" ? (p.covered ? ", lid on" : ", lid off") : ""}`;
+      return `<div class="entry"><b>${esc(p.name)}</b><br><span class="dim">${ings} · ${esc(how)}</span>
+        <br>${eff ? `<span class="hint">${eff}</span>` : `<span class="dim">no noticeable effect</span>`}
+        ${p.notes.length ? `<br><span class="dim">${p.notes.map(esc).join(" · ")}</span>` : ""}</div>`;
+    }).join("");
   }
 
   private journal() {
@@ -100,7 +131,10 @@ export class Satchel {
         const smell = e.smelled.includes(pr.id) ? `smell: ${esc(pr.smell || "faint")}` : "smell: ?";
         const taste = e.tasted.includes(pr.id) ? `taste: ${esc(pr.taste || "bland")}` : "taste: ?";
         const best = e.best[pr.id] ? ` · best ${e.best[pr.id]}%` : "";
-        return `<li>${got ? "✓" : "○"} ${esc(pr.name)} <span class="dim">(${pr.part.toLowerCase()}) — ${smell} · ${taste}${best}</span></li>`;
+        const eff = e.effects?.[pr.id]?.length ? `<br><span class="hint">does: ${e.effects[pr.id].map(effectWord).map(esc).join(", ")}</span>` : "";
+        const sus = e.suspected?.[pr.id]?.length ? `<br><span class="dim">maybe: ${e.suspected[pr.id].map(effectWord).map(esc).join(", ")}?</span>` : "";
+        const no = e.doesnt?.[pr.id]?.length ? `<br><span class="dim">not for: ${e.doesnt[pr.id].map(effectWord).map(esc).join(", ")}</span>` : "";
+        return `<li>${got ? "✓" : "○"} ${esc(pr.name)} <span class="dim">(${pr.part.toLowerCase()}) — ${smell} · ${taste}${best}</span>${eff}${sus}${no}</li>`;
       }).join("");
       const months = e.months.sort((a, b) => a - b).map((m) => MONTHS[m - 1]).join(", ");
       return `<div class="entry"><b>${esc(p.name)}</b> <i>${esc(p.latin)}</i>
@@ -113,6 +147,7 @@ export class Satchel {
 }
 
 function potencyBar(p: number) {
+  p = Math.round(p);
   return `<span class="pot"><span style="width:${p}%"></span></span> ${p}%`;
 }
 function duration(min: number) {

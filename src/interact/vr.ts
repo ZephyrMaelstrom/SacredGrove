@@ -6,7 +6,11 @@
  *   Look steadily at a plant  → identify it
  *   Right B / thumbstick click → next tool        Left Y → gloves on/off
  *   Left X (or Menu)           → open/close the satchel panel
- *   Right A, or pinch beside the door or barn → sleep / unload
+ *   Right A, or pinch at a station → use it (bed, bench, racks, cellar,
+ *                                       seed catalog, stand…); its panel floats
+ *                                       in front of you
+ *   At the bench, with a herb in the mortar: squeeze/pinch inside the mortar
+ *   and stir in circles to grind it
  *
  * A small readout floats above your left hand: time, weather, tool, basket,
  * what you're looking at, and the last thing that happened.
@@ -17,9 +21,14 @@ import {
   type AbstractMesh, type Scene, type WebXRDefaultExperience, type WebXRHandTracking,
   type WebXRInputSource, type WebXRHand, type WebXRAbstractMotionController,
 } from "@babylonjs/core";
-import { AdvancedDynamicTexture, Button, Control, Grid, Rectangle, StackPanel, TextBlock } from "@babylonjs/gui";
+import { AdvancedDynamicTexture, Control, Rectangle, TextBlock } from "@babylonjs/gui";
 import type { Session } from "../game/session";
-import { DOOR, BARN } from "../game/session";
+import { VrPanel } from "./vrPanel";
+import { layout } from "../world/layout";
+import { roomAt } from "../world/walk";
+import { isPrep } from "../game/items";
+import { itemName, prepSummary } from "../game/homestead";
+import { effectWord, type PanelView } from "../game/stations";
 import type { Target } from "../game/forage";
 import { TOOL_NAMES, type Tool } from "../game/harvest";
 import { describe, temperatureAt } from "../time/climate";
@@ -27,6 +36,7 @@ import { formatTime } from "../time/clock";
 import { formatDoy } from "../sim/phenology";
 import { heightAt, groundHit } from "../world/map";
 import { PLANTS } from "../data/plants";
+import { herbCondition } from "../game/storage";
 import type { HerbRenderer } from "../veg/herbs";
 import type { Toasts } from "../ui/toast";
 
@@ -146,18 +156,21 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
     return pos.y <= gy + 2.6 ? t : null;
   };
 
+  /** Feet height: the headset's height above the floor it stands on. */
+  const feetY = () => {
+    const c = xr.baseExperience.camera;
+    return c.globalPosition.y - (c.realWorldHeight || 1.6);
+  };
   const tryInteract = (handPos: Vector3 | null) => {
     const cam = scene.activeCamera;
     if (!cam) return false;
-    const p = handPos ?? cam.globalPosition;
-    for (const it of [DOOR, BARN]) {
-      const d = Math.hypot(p.x - it.x, p.z - it.z);
-      if ((handPos && d < 1.4) || (!handPos && d < it.radius)) {
-        session.interact(it);
-        return true;
-      }
-    }
-    return false;
+    const p = cam.globalPosition;
+    const it = session.nearbyInteractable(p.x, p.z, feetY());
+    if (!it) return false;
+    // A pinch must be made near the thing itself, not anywhere in the room.
+    if (handPos && Math.hypot(handPos.x - it.x, handPos.z - it.z) > it.radius + 0.3) return false;
+    session.interact(it);
+    return true;
   };
 
   // ---------------------------------------------------------- wrist readout
@@ -181,8 +194,18 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
   let lastToast = "";
   wrist.setEnabled(false);
 
-  // ---------------------------------------------------------- satchel panel
+  // ---------------------------------------------------------- panels
   const satchel = createVrSatchel(scene, session);
+  const stationPanel = new VrPanel(scene, "vrStation", (act) => session.stationAct(act), 1.05);
+  const syncStation = () => {
+    const inXR = xr.baseExperience.state === WebXRState.IN_XR;
+    stationPanel.show(inXR ? session.panelView() : null);
+  };
+  session.subscribe(syncStation);
+  // Grinding: stir inside the mortar with a squeezed hand.
+  const mortarAt = new Vector3(layout().anchors.mortar.x, layout().anchors.mortar.y + 0.06, layout().anchors.mortar.z);
+  const lastStir: Record<Side, Vector3 | null> = { left: null, right: null };
+  let stirred = 0;
 
   // ---------------------------------------------------------- per frame
   scene.onBeforeRenderObservable.add(() => {
@@ -198,12 +221,29 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
     const hit = groundHit(cp.x, cp.y, cp.z, dir.x, dir.y, dir.z, 6);
     gazeTarget = hit && hit.distance <= 4.5 ? session.targetAt(hit.x, hit.z) : null;
     gazeProgress = satchel.open ? 0 : session.look(gazeTarget, dt);
+    session.room = roomAt(cp.x, cp.z, feetY());
+    // Walk away from a station and its panel closes.
+    if (session.panel && !session.panelInReach(cp.x, cp.z, feetY())) session.openPanel(null);
 
     for (const h of Object.values(hands)) {
       const pos = handPosition(h);
       h.wasPressed = h.pressed;
       h.pressed = !!pos && isPressed(h);
-      if (!pos || satchel.open) { session.release(h.side); h.progress = 0; continue; }
+      // Stirring the mortar.
+      if (pos && h.pressed && session.panel === "bench" && session.draft.mortar && Vector3.Distance(pos, mortarAt) < 0.16) {
+        const last = lastStir[h.side];
+        if (last) stirred += Vector3.Distance(pos, last);
+        lastStir[h.side] = pos.clone();
+        if (stirred >= 0.12) {
+          stirred = 0;
+          session.stationAct("grind:1");
+          pulse(h, 0.25, 25);
+        }
+        h.progress = 0;
+        continue;
+      }
+      lastStir[h.side] = null;
+      if (!pos || satchel.open || stationPanel.open) { session.release(h.side); h.progress = 0; continue; }
       const edge = h.pressed && !h.wasPressed;
       if (edge && tryInteract(pos)) continue;
       const t = h.pressed ? reachable(pos) : null;
@@ -240,133 +280,105 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
     const lines = [
       `${formatTime(s.clock.minutes)} · ${formatDoy(s.clock.doy)} · ${Math.round(temperatureAt(w, s.clock.minutes))}°F ${describe(w, s.clock.minutes)}`,
       `${TOOL_NAMES[s.tool]}${s.gloves ? " + gloves" : ""} · basket ${session.basketLine()}`,
+      session.moneyLine(),
     ];
     const statuses = s.statuses.filter((x) => x.until > session.nowAbsMinute).map((x) => x.label);
     if (statuses.length) lines.push(statuses.join(" · "));
     const prog = Math.max(hands.left.progress, hands.right.progress);
     if (prog > 0) lines.push(`Harvesting ${"▮".repeat(Math.ceil(prog * 8))}${"▯".repeat(8 - Math.ceil(prog * 8))}`);
     else if (gazeTarget) lines.push(`${session.displayName(gazeTarget)}${gazeProgress > 0 ? " — looking closer…" : ""}`);
-    const near = session.nearbyInteractable(cam.globalPosition.x, cam.globalPosition.z);
-    if (near) lines.push(`A / pinch at it: ${near.label}`);
+    const near = session.nearbyInteractable(cam.globalPosition.x, cam.globalPosition.z, feetY());
+    if (near && !stationPanel.open) lines.push(`A / pinch at it: ${near.label}`);
+    if (session.panel === "bench" && session.draft.mortar) lines.push("Squeeze in the mortar and stir to grind");
     if (toasts.last && toasts.last !== lastToast) lastToast = toasts.last;
     if (lastToast) lines.push(lastToast);
     wristText.text = lines.join("\n");
   });
 
-  return { hands };
+  return { hands, showJournal: () => satchel.showJournal() };
 }
 
 // ------------------------------------------------------------ VR satchel
 
-function createVrSatchel(scene: Scene, session: Session) {
-  const plane = MeshBuilder.CreatePlane("vrSatchel", { width: 0.9, height: 0.64 }, scene);
-  plane.isNearPickable = true;
-  plane.renderingGroupId = 2;
-  plane.setEnabled(false);
-  const ui = AdvancedDynamicTexture.CreateForMesh(plane, 1152, 820);
-  const bg = new Rectangle("sbg");
-  bg.background = "rgba(20,28,20,0.92)";
-  bg.cornerRadius = 30;
-  bg.thickness = 0;
-  ui.addControl(bg);
-  const grid = new Grid("sgrid");
-  grid.addRowDefinition(90, true);
-  grid.addRowDefinition(1);
-  bg.addControl(grid);
-  const head = new StackPanel("shead");
-  head.isVertical = false;
-  head.height = "90px";
-  grid.addControl(head, 0, 0);
-  const body = new StackPanel("sbody");
-  body.paddingLeft = body.paddingRight = "30px";
-  grid.addControl(body, 1, 0);
+type SatchelTab = "basket" | "tools" | "journal";
 
-  let tab: "basket" | "tools" | "journal" = "basket";
-  const button = (label: string, w: number, fn: () => void, warn = false) => {
-    const b = Button.CreateSimpleButton(`b_${label}_${Math.random()}`, label);
-    b.width = `${w}px`;
-    b.height = "64px";
-    b.color = "#eef0e6";
-    b.fontSize = 28;
-    b.background = warn ? "#7a3a2a" : "#3d5a36";
-    b.cornerRadius = 12;
-    b.paddingLeft = b.paddingRight = "6px";
-    b.onPointerUpObservable.add(fn);
-    return b;
-  };
-  const text = (t: string, size = 28, color = "#eef0e6") => {
-    const tb = new TextBlock(undefined, t);
-    tb.color = color;
-    tb.fontSize = size;
-    tb.height = `${size + 20}px`;
-    tb.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    tb.textWrapping = true;
-    return tb;
-  };
-
-  const render = () => {
-    head.clearControls();
-    for (const t of ["basket", "tools", "journal"] as const) head.addControl(button(t[0].toUpperCase() + t.slice(1), 220, () => { tab = t; render(); }));
-    head.addControl(button("Close", 160, () => api.toggle(), true));
-    body.clearControls();
-    const s = session.state;
-    if (tab === "basket") {
-      body.addControl(text(`Basket ${session.basketLine()}`, 30, "#c8ccbd"));
-      if (!s.basket.length) body.addControl(text("Empty. Reach to a plant and squeeze or pinch to harvest."));
-      for (const l of s.basket.slice(0, 7)) {
-        const row = new StackPanel();
-        row.isVertical = false;
-        row.height = "76px";
-        const plant = PLANTS.find((p) => p.latin === l.latin);
-        const known = !!(plant && s.journal[l.latin]?.identified);
-        const label = text(`${known ? l.productName : "Unknown " + l.part.toLowerCase()} · ${l.grams} g · ${l.potency}%`, 26);
-        label.width = "560px";
-        row.addControl(label);
-        row.addControl(button("Smell", 150, () => session.smell(l.id)));
-        row.addControl(button("Taste", 150, () => session.taste(l.id), true));
-        row.addControl(button("Toss", 140, () => session.discard(l.id)));
-        body.addControl(row);
-      }
-      if (s.basket.length > 7) body.addControl(text(`…and ${s.basket.length - 7} more`, 24, "#c8ccbd"));
-    } else if (tab === "tools") {
-      const row = new StackPanel();
-      row.isVertical = false;
-      row.height = "90px";
-      for (const t of ["hand", "knife", "trowel"] as Tool[]) row.addControl(button((s.tool === t ? "● " : "") + TOOL_NAMES[t], 240, () => session.setTool(t)));
-      body.addControl(row);
-      body.addControl(button(s.gloves ? "Take gloves off" : "Put gloves on", 400, () => session.toggleGloves()));
-      body.addControl(text("Hands: leaves, flowers, fruit, seed. Knife: bark, sap, whole stems (cleaner cuts). Trowel: roots, rhizomes, bulbs.", 24, "#c8ccbd"));
-      body.addControl(text("Poison ivy, nettle, wild parsnip sap and thorns hurt bare hands.", 24, "#e8b8a0"));
-    } else {
-      const entries = Object.values(s.journal);
-      const known = entries.filter((e) => e.identified);
-      body.addControl(text(`${known.length} identified · ${entries.length - known.length} unknown`, 30, "#c8ccbd"));
-      for (const e of known.slice(-8).reverse()) {
+function satchelView(session: Session, tab: SatchelTab): PanelView {
+  const s = session.state;
+  const tabs = { rows: [], buttons: (["basket", "tools", "journal"] as SatchelTab[]).map((t) => ({ label: t[0].toUpperCase() + t.slice(1), act: `tab:${t}`, on: t === tab })) };
+  if (tab === "basket") {
+    return {
+      title: "Satchel", subtitle: `Basket ${session.basketLine()} · ${session.moneyLine()}`,
+      sections: [tabs, {
+        note: s.basket.length ? undefined : "Empty. Reach to a plant and squeeze or pinch to harvest.",
+        rows: s.basket.map((it) => ({
+          text: isPrep(it) ? `${it.name} · ${it.volumeMl} ml` : `${itemName(s, it)} · ${it.grams} g`,
+          sub: isPrep(it) ? prepSummary(it) : `${it.part} · ${herbCondition(it)}`,
+          bar: isPrep(it) ? undefined : Math.round(it.potency),
+          buttons: [
+            ...(isPrep(it) ? [] : [{ label: "Smell", act: `smell:${it.id}` }]),
+            { label: "Taste", act: `taste:${it.id}`, warn: true },
+            { label: "Toss", act: `toss:${it.id}` },
+          ],
+        })),
+      }],
+    };
+  }
+  if (tab === "tools") {
+    return {
+      title: "Satchel",
+      sections: [tabs, {
+        note: "Hands: leaves, flowers, fruit, seed. Knife: bark, sap, whole stems. Trowel: roots, rhizomes, bulbs. Poison ivy, nettle, wild parsnip sap and thorns hurt bare hands.",
+        rows: [
+          { text: "Tool", buttons: (["hand", "knife", "trowel"] as Tool[]).map((t) => ({ label: TOOL_NAMES[t], act: `tool:${t}`, on: s.tool === t })) },
+          { text: s.gloves ? "Wearing gloves" : "Bare-handed", buttons: [{ label: s.gloves ? "Gloves off" : "Gloves on", act: "gloves" }] },
+        ],
+      }],
+    };
+  }
+  const known = Object.values(s.journal).filter((e) => e.identified);
+  return {
+    title: "Field Journal", subtitle: `${known.length} identified · ${Object.keys(s.protocols).length} recipes`,
+    sections: [tabs, {
+      rows: known.slice().reverse().map((e) => {
         const p = PLANTS.find((x) => x.latin === e.latin)!;
-        body.addControl(text(`${p.name} — ${e.timesHarvested} harvest${e.timesHarvested === 1 ? "" : "s"}${e.notes.length ? " · " + e.notes[0] : ""}`, 24));
-      }
-      body.addControl(text("Full journal pages are in the desktop satchel (Tab).", 22, "#9aa090"));
-    }
+        const does = Object.values(e.effects ?? {}).flat();
+        return {
+          text: `${p.name} — ${e.timesHarvested} harvest${e.timesHarvested === 1 ? "" : "s"}`,
+          sub: [does.length ? `does: ${[...new Set(does)].map(effectWord).join(", ")}` : "", e.notes[0] ?? ""].filter(Boolean).join(" · ") || p.latin,
+        };
+      }),
+    }],
   };
+}
 
+function createVrSatchel(scene: Scene, session: Session) {
+  let tab: SatchelTab = "basket";
+  const panel = new VrPanel(scene, "vrSatchel", (act) => {
+    const [verb, a] = act.split(":");
+    if (verb === "close") return api.toggle();
+    if (verb === "tab") tab = a as SatchelTab;
+    if (verb === "smell") session.smell(a);
+    if (verb === "taste") session.taste(a);
+    if (verb === "toss") session.discard(a);
+    if (verb === "tool") session.setTool(a as Tool);
+    if (verb === "gloves") session.toggleGloves();
+    render();
+  }, 0.95);
+  const render = () => panel.show(api.open ? satchelView(session, tab) : null);
   const api = {
-    open: false,
+    get open() { return panel.open; },
     toggle() {
-      api.open = !api.open;
-      session.paused = api.open;
-      plane.setEnabled(api.open);
-      if (api.open) {
-        const cam = scene.activeCamera!;
-        const f = cam.getDirection(Vector3.Forward());
-        f.y = 0;
-        f.normalize();
-        plane.position = cam.globalPosition.add(f.scale(0.85)).add(new Vector3(0, -0.15, 0));
-        plane.lookAt(cam.globalPosition.add(new Vector3(0, -0.15, 0)));
-        plane.rotate(Vector3.Up(), Math.PI); // the plane's front faces away from lookAt
-        render();
-      }
+      const opening = !panel.open;
+      session.paused = opening;
+      if (opening) panel.show(satchelView(session, tab));
+      else panel.show(null);
+    },
+    showJournal() {
+      tab = "journal";
+      if (!panel.open) api.toggle();
+      else render();
     },
   };
-  session.subscribe(() => { if (api.open) render(); });
+  session.subscribe(() => { if (panel.open) render(); });
   return api;
 }

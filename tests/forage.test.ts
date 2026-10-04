@@ -8,7 +8,9 @@ import { NEUTRAL_SEASON } from "../src/time/season";
 import { weatherOn, type DayWeather } from "../src/time/climate";
 import { choose, toolFor, potency, recoveryYears, contactHazard, stageFit, type PlantContext, type Tool } from "../src/game/harvest";
 import { HarvestState, emptyHarvestState, patchKey } from "../src/game/harvestState";
-import { harvest, taste, smell, examine, type Target } from "../src/game/forage";
+import { harvest, examine, type Target } from "../src/game/forage";
+import { taste, smell } from "../src/game/homestead";
+import { upgradeLot } from "../src/game/items";
 import { newGame, restore, hasStatus, DATA_HASH, type GameStateData } from "../src/game/state";
 import { addToBasket, BASKET_CAPACITY_G } from "../src/game/basket";
 import { WORLD_SEED } from "../src/sim/placement";
@@ -216,7 +218,7 @@ describe("smell and taste", () => {
 describe("saves", () => {
   it("round-trips through JSON", () => {
     const s = newGame(world);
-    s.basket.push({ id: "a", latin: "x", productId: "SP001", productName: "x", part: "Leaf", grams: 10, potency: 50, harvestedDay: 70 });
+    s.basket.push(upgradeLot({ id: "a", latin: "x", productId: "SP001", productName: "x", part: "Leaf", grams: 10, potency: 50, harvestedDay: 70 }, 70));
     const back = restore(JSON.stringify(s), world);
     expect(back.state).toEqual(s);
     expect(back.note).toBeNull();
@@ -224,7 +226,7 @@ describe("saves", () => {
   it("clears harvest records but keeps the rest when the world changed", () => {
     const s = newGame(world);
     s.harvest.individuals["h1"] = { pickedUntil: 99 };
-    s.basket.push({ id: "a", latin: "x", productId: "SP001", productName: "x", part: "Leaf", grams: 10, potency: 50, harvestedDay: 70 });
+    s.basket.push(upgradeLot({ id: "a", latin: "x", productId: "SP001", productName: "x", part: "Leaf", grams: 10, potency: 50, harvestedDay: 70 }, 70));
     const back = restore(JSON.stringify(s), { ...world, herbs: 999 });
     expect(back.state.harvest).toEqual(emptyHarvestState());
     expect(back.state.basket).toHaveLength(1);

@@ -127,6 +127,19 @@ for (const r of sheet("Plants")) {
 }
 
 // ---------------------------------------------------------------- products
+const EFFECT_TAGS = ["sleep", "calm", "digestion", "cough", "fever", "wound", "skin", "pain", "immunity", "stamina", "kidney", "flavor", "food", "dye", "repellent", "toxic"];
+function parseEffects(text, where) {
+  const out = {};
+  for (const pair of String(text ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const [tag, v] = pair.split(":").map((x) => x.trim());
+    const n = Number(v);
+    if (!EFFECT_TAGS.includes(tag)) { fail(`${where}: unknown effect "${tag}" (use ${EFFECT_TAGS.join(", ")})`); continue; }
+    if (!(n > 0 && n <= 1)) { fail(`${where}: effect ${tag} needs a strength 0–1 (got "${v}")`); continue; }
+    out[tag] = n;
+  }
+  return out;
+}
+
 const byLatin = new Map(plants.map((p) => [p.latin, p]));
 let orphanProducts = 0;
 for (const r of sheet("Species")) {
@@ -151,6 +164,8 @@ for (const r of sheet("Species")) {
     rarity: Number(r["Rarity (1-5)"]),
     basePrice: Number(r["Base Price (c)"]) || 0,
     shelfLifeDays: Number(r["Shelf Life (days)"]) || 0,
+    effects: parseEffects(r["Effects (tag:strength)"], `Species › ${r["Common Name"]}`),
+    cookOnly: /must be cooked|toxic raw/i.test(String(r["Primary Use / Effect"] ?? "")),
   };
   if (!plant) { orphanProducts++; continue; } // plants for later maps aren't authored yet
   plant.products.push(product);

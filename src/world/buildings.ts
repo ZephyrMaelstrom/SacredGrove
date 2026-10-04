@@ -9,12 +9,14 @@ import {
   ShadowGenerator,
 } from "@babylonjs/core";
 import { SITE, heightAt } from "./map";
+import { layout } from "./layout";
 
 /**
- * Gray-box homestead (M1). Every building is simple primitives at true scale so
- * walking distances and sight lines can be judged in the headset before final
- * Blender models replace them in M6. Each top-level node is named so the
- * replacement can be dropped in at the same transform.
+ * The homestead. Walls, floors, stairs and furniture come from the shared
+ * layout (layout.ts), so what you see is what you walk on and bump into;
+ * this file adds roofs, doors, trim and the outdoor pieces. Still simple
+ * primitives at true scale: final models can replace them at the same
+ * transforms later.
  */
 
 const PALETTE = {
@@ -31,6 +33,14 @@ const PALETTE = {
   soil: new Color3(0.27, 0.2, 0.14),
   manure: new Color3(0.25, 0.19, 0.12),
   sign: new Color3(0.13, 0.15, 0.13),
+  plank: new Color3(0.6, 0.47, 0.32),
+  plaster: new Color3(0.9, 0.87, 0.8),
+  stone: new Color3(0.5, 0.48, 0.44),
+  glass: new Color3(0.62, 0.72, 0.78),
+  paper: new Color3(0.9, 0.86, 0.72),
+  iron: new Color3(0.16, 0.16, 0.17),
+  quilt: new Color3(0.55, 0.22, 0.2),
+  gravel: new Color3(0.55, 0.53, 0.49),
 };
 
 export class Builder {
@@ -76,6 +86,10 @@ export class Builder {
       m = new StandardMaterial(`mat_${key}`, this.scene);
       m.diffuseColor = PALETTE[key];
       m.specularColor = new Color3(0.04, 0.04, 0.04);
+      if (key === "glass") {
+        m.alpha = 0.22;
+        m.specularColor = new Color3(0.5, 0.5, 0.5);
+      }
       this.mats.set(key, m);
     }
     return m;
@@ -98,13 +112,31 @@ export class Builder {
   }
 
   /** Triangular prism roof: ridge runs along local Z. Bottom-centre at (x, y, z). */
-  gable(name: string, parent: TransformNode, mat: keyof typeof PALETTE, w: number, rise: number, d: number, x: number, y: number, z: number) {
+  gable(
+    name: string, parent: TransformNode, mat: keyof typeof PALETTE, w: number, rise: number, d: number, x: number, y: number, z: number,
+    opts: { openBottom?: boolean; inner?: keyof typeof PALETTE } = {},
+  ) {
     const hw = w / 2, hd = d / 2;
     const p = [
       -hw, 0, -hd, hw, 0, -hd, 0, rise, -hd, // front triangle
       -hw, 0, hd, hw, 0, hd, 0, rise, hd, // back triangle
     ];
-    const idx = [0, 2, 1, 3, 4, 5, 0, 3, 5, 0, 5, 2, 1, 2, 5, 1, 5, 4, 0, 1, 4, 0, 4, 3];
+    const idx = [0, 2, 1, 3, 4, 5, 0, 3, 5, 0, 5, 2, 1, 2, 5, 1, 5, 4];
+    if (!opts.openBottom) idx.push(0, 1, 4, 0, 4, 3);
+    if (opts.inner) {
+      // The same surfaces seen from inside (reversed winding), in an interior colour.
+      const rev: number[] = [];
+      for (let i = 0; i < idx.length; i += 3) rev.push(idx[i], idx[i + 2], idx[i + 1]);
+      const vi = new VertexData();
+      vi.positions = p.slice();
+      vi.indices = rev;
+      vi.uvs = new Array((p.length / 3) * 2).fill(0);
+      const mi = new Mesh(`${name}_inner`, this.scene);
+      vi.applyToMesh(mi);
+      mi.convertToFlatShadedMesh();
+      mi.position.set(x, y, z);
+      this.finish(mi, parent, opts.inner, false);
+    }
     const vd = new VertexData();
     vd.positions = p;
     vd.indices = idx;
@@ -131,40 +163,38 @@ export class Builder {
   }
 }
 
+// ------------------------------------------------------------------ the layout
+
+/** Every wall, floor, stair and piece of furniture from the shared layout (see layout.ts). */
+function layoutBoxes(b: Builder) {
+  const root = new TransformNode("homestead_layout", b.scene);
+  for (const [i, x] of layout().boxes.entries()) {
+    if (!x.mat) continue;
+    b.box(`lb_${i}`, root, x.mat, x.x1 - x.x0, x.y1 - x.y0, x.z1 - x.z0, (x.x0 + x.x1) / 2, x.y0, (x.z0 + x.z1) / 2, !!x.cast && x.mat !== "glass");
+  }
+}
+
 // ------------------------------------------------------------------ farmhouse
 
 function farmhouse(b: Builder) {
   const { x, z, w, d } = SITE.farmhouse;
+  const A = layout().anchors;
   const root = b.site("farmhouse", x, z);
-  // Foundation runs below grade so the house never floats on uneven ground.
-  b.box("fh_foundation", root, "concrete", w + 0.3, 1.2, d + 0.3, 0, -0.8, 0);
-  b.box("fh_body", root, "houseWall", w, 5.8, d, 0, 0.4, 0);
+  root.position.y = A.gH;
   b.gable("fh_roof", root, "roofShingle", d + 1.0, 2.8, w + 0.8, 0, 6.2, 0).rotation.y = Math.PI / 2;
   b.box("fh_chimney", root, "concrete", 0.8, 3.2, 0.8, 2.6, 6.0, 1.5);
-
-  // Front (south) porch facing the road.
-  b.box("fh_porch_deck", root, "wood", w, 0.25, 2.6, 0, 0.15, -d / 2 - 1.3);
+  // Porch posts and roof.
   for (const px of [-w / 2 + 0.2, -1.5, 1.5, w / 2 - 0.2]) {
     b.box(`fh_porch_post_${px}`, root, "trim", 0.18, 2.6, 0.18, px, 0.4, -d / 2 - 2.45);
   }
   const porchRoof = b.box("fh_porch_roof", root, "roofShingle", w + 0.4, 0.12, 3.0, 0, 3.0, -d / 2 - 1.4);
   porchRoof.rotation.x = -0.18;
-  b.box("fh_door", root, "darkWood", 1.0, 2.1, 0.08, 0, 0.4, -d / 2 - 0.04);
-  b.box("fh_steps", root, "wood", 1.6, 0.15, 0.6, 0, 0, -d / 2 - 2.9, false);
-
-  // Windows: two stories on the front, the player room is upstairs front-left.
+  // Front door, standing open into the kitchen.
+  b.box("fh_door", root, "darkWood", 0.05, 2.1, 0.95, -0.47, 0.4, -d / 2 + 0.7, false);
+  // Window trim on the outside.
   for (const [wx, wy] of [[-3, 1.4], [3, 1.4], [-3, 4.2], [3, 4.2], [0, 4.2]] as const) {
-    b.box(`fh_win_f_${wx}_${wy}`, root, "window", 1.0, 1.4, 0.06, wx, wy, -d / 2 - 0.03, false);
+    b.box(`fh_trim_${wx}_${wy}`, root, "trim", 1.2, 0.1, 0.12, wx, wy - 0.1, -d / 2 - 0.05, false);
   }
-  for (const [wz, wy] of [[-2.2, 1.4], [2.2, 1.4], [-2.2, 4.2], [2.2, 4.2]] as const) {
-    b.box(`fh_win_e_${wz}_${wy}`, root, "window", 0.06, 1.4, 1.0, w / 2 + 0.03, wy, wz, false);
-    b.box(`fh_win_w_${wz}_${wy}`, root, "window", 0.06, 1.4, 1.0, -w / 2 - 0.03, wy, wz, false);
-  }
-
-  // Root cellar bulkhead on the east side: sloped double doors into the ground.
-  const bulk = b.box("rootcellar_bulkhead", root, "darkWood", 1.6, 0.12, 2.0, w / 2 + 1.0, 0.45, -1.5);
-  bulk.rotation.z = -0.35;
-  b.box("rootcellar_curb", root, "concrete", 1.9, 0.35, 2.2, w / 2 + 1.0, -0.05, -1.5);
   return root;
 }
 
@@ -172,22 +202,34 @@ function farmhouse(b: Builder) {
 
 function barn(b: Builder) {
   const { x, z, w, d } = SITE.barn;
+  const A = layout().anchors;
   const root = b.site("barn", x, z);
-  b.box("barn_foundation", root, "concrete", w + 0.2, 1.0, d + 0.2, 0, -0.6, 0);
-  b.box("barn_body", root, "barnWall", w, 5.2, d, 0, 0.4, 0);
-  // Gambrel read as a tall gable for the gray-box.
-  b.gable("barn_roof", root, "barnRoof", w + 1.0, 5.0, d + 1.0, 0, 5.6, 0);
-  // South gable end: big doors (apothecary entrance) and hayloft door.
-  b.box("barn_door_main", root, "darkWood", 4.2, 3.6, 0.1, 0, 0.4, -d / 2 - 0.05);
+  root.position.y = A.gB;
+  // Gambrel read as a tall gable: open underneath so the loft sees the rafters.
+  b.gable("barn_roof", root, "barnRoof", w + 1.0, 5.0, d + 1.0, 0, 5.6, 0, { openBottom: true, inner: "plank" });
+  // Rafters, for the loft.
+  for (let rz = -d / 2 + 1; rz < d / 2; rz += 2) {
+    const r1 = b.box(`barn_rafter_a${rz}`, root, "darkWood", 0.1, 0.12, 0.1, 0, 0, rz, false);
+    r1.scaling.x = 88; // 8.8 m slope
+    r1.position.set(-3.7, 5.6 + 2.35, rz);
+    r1.rotation.z = Math.atan2(5, w / 2 + 0.5);
+    const r2 = b.box(`barn_rafter_b${rz}`, root, "darkWood", 0.1, 0.12, 0.1, 0, 0, rz, false);
+    r2.scaling.x = 88;
+    r2.position.set(3.7, 5.6 + 2.35, rz);
+    r2.rotation.z = -Math.atan2(5, w / 2 + 0.5);
+  }
+  // The big doors, slid open along the outside of the south wall.
+  b.box("barn_door_l", root, "darkWood", 2.3, 3.7, 0.08, -3.3, 0.4, -d / 2 - 0.08);
+  b.box("barn_door_r", root, "darkWood", 2.3, 3.7, 0.08, 3.3, 0.4, -d / 2 - 0.08);
+  b.box("barn_door_track", root, "iron", 9.2, 0.08, 0.1, 0, 4.1, -d / 2 - 0.08, false);
+  // Old hayloft door up in the south gable, and its hood.
   b.box("barn_hayloft_door", root, "darkWood", 2.0, 1.8, 0.1, 0, 6.2, -d / 2 - 0.05);
   b.box("barn_hay_hood", root, "barnRoof", 2.6, 0.15, 1.2, 0, 8.6, -d / 2 - 0.55);
-  // Tack room lean-to on the west side.
-  b.box("tackroom_body", root, "barnWall", 4, 3.0, 8, -w / 2 - 2, 0.4, -4);
-  const shed = b.box("tackroom_roof", root, "barnRoof", 4.8, 0.12, 8.6, -w / 2 - 2.1, 3.5, -4);
-  shed.rotation.z = 0.28;
-  b.box("tackroom_door", root, "darkWood", 0.9, 2.0, 0.08, -w / 2 - 2, 0.4, -8.04);
-  // Concrete apron where the drive meets the barn.
-  b.box("barn_apron", root, "concrete", 8, 0.15, 5, 0, -0.05, -d / 2 - 2.5, false);
+  // Tack room lean-to roof, sloping away from the barn.
+  const tackTop = A.tackTop - A.gB;
+  const shed = b.box("tackroom_roof", root, "barnRoof", 4.6, 0.12, 8.6, -w / 2 - 2.15, tackTop, -4);
+  shed.rotation.z = 0.06;
+  b.box("tackroom_door", root, "darkWood", 0.05, 2.0, 0.85, -w / 2 - 3.0 - 0.45, 0.4, -8 + 0.65, false);
   return root;
 }
 
@@ -268,6 +310,7 @@ function roadside(b: Builder) {
 
 export function createHomestead(scene: Scene, shadows?: ShadowGenerator): Builder {
   const b = new Builder(scene, shadows);
+  layoutBoxes(b);
   farmhouse(b);
   barn(b);
   barnyard(b);

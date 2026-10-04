@@ -1,26 +1,42 @@
 /**
- * Everything that belongs to a save: the clock, what you carry, what you know,
- * what you've done to the land, and how you're feeling.
+ * Everything that belongs to a save: the clock, what you carry and store,
+ * what you know, what you've done to the land, your money and reputation,
+ * and how you're feeling.
  *
- * Saved to the browser (localStorage) when you sleep. Firebase sync comes
- * later; the format is plain JSON so it can move there unchanged.
+ * Saved to the browser (localStorage) when you sleep. The format is plain
+ * JSON so it can move to Firebase unchanged.
  */
 import { NEW_GAME_CLOCK, absDay, sleep, advance, MINUTES_PER_DAY, type ClockState, type ClockEvents } from "../time/clock";
 import { emptyHarvestState, type HarvestStateData } from "./harvestState";
 import type { Basket } from "./basket";
-import type { Journal } from "./journal";
+import type { Journal, Protocol } from "./journal";
 import type { Tool } from "./harvest";
+import type { Item, PrepItem } from "./items";
+import { upgradeLot } from "./items";
+import type { Order } from "./market";
+import type { PlaceId } from "./storage";
 import { hashString } from "../sim/random";
-import plantsRaw from "../data/plants.gen.json";
+import { PLANTS } from "../data/plants";
 
 export const SAVE_KEY = "rootwake.save.v1";
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface Status {
   id: string;
   label: string;
   /** Absolute minute it wears off. */
   until: number;
+}
+
+export type StoragePlace = Exclude<PlaceId, "basket">;
+
+export interface BrewJob {
+  id: string;
+  /** The finished preparation (made when started, handed over when done). */
+  prep: PrepItem;
+  startedAt: number;
+  /** Absolute minute it's ready. */
+  readyAt: number;
 }
 
 export interface GameStateData {
@@ -31,18 +47,37 @@ export interface GameStateData {
   tool: Tool;
   gloves: boolean;
   basket: Basket;
-  /** Raw harvest unloaded at the barn (the storage rooms arrive in M6). */
-  stores: Basket;
+  storage: Record<StoragePlace, Item[]>;
+  /** Hayloft vent door. */
+  ventOpen: boolean;
   journal: Journal;
+  protocols: Record<string, Protocol>;
   harvest: HarvestStateData;
   statuses: Status[];
-  stats: { harvests: number; daysPlayed: number };
+  /** Cents in your pocket. */
+  money: number;
+  /** Cents waiting in the stand's cash box. */
+  cashBox: number;
+  /** 0–100: how the neighbors talk about you. */
+  reputation: number;
+  orders: Order[];
+  jobs: BrewJob[];
+  /** Recent happenings, newest first. */
+  ledger: { day: number; text: string }[];
+  lastSimDay: number;
+  stats: { harvests: number; daysPlayed: number; brews: number; sales: number; ordersDone: number };
 }
 
-/** Changes whenever the plant data changes (placement depends on it). */
-export const DATA_HASH = hashString(JSON.stringify(plantsRaw));
+/**
+ * Changes whenever the plant ecology changes (placement depends on it).
+ * Products, effects and prices are left out, so editing those in the
+ * workbook doesn't regrow the land under an existing save.
+ */
+export const DATA_HASH = hashString(JSON.stringify(PLANTS.map(({ products: _p, notes: _n, ...eco }) => eco)));
 
 export const absMinute = (c: ClockState) => absDay(c) * MINUTES_PER_DAY + c.minutes;
+
+const emptyStorage = (): Record<StoragePlace, Item[]> => ({ loft: [], cellar: [], tack: [], shelf: [], stand: [] });
 
 export function newGame(world: GameStateData["world"]): GameStateData {
   return {
@@ -52,11 +87,20 @@ export function newGame(world: GameStateData["world"]): GameStateData {
     tool: "hand",
     gloves: false,
     basket: [],
-    stores: [],
+    storage: emptyStorage(),
+    ventOpen: true,
     journal: {},
+    protocols: {},
     harvest: emptyHarvestState(),
     statuses: [],
-    stats: { harvests: 0, daysPlayed: 0 },
+    money: 500,
+    cashBox: 0,
+    reputation: 20,
+    orders: [],
+    jobs: [],
+    ledger: [],
+    lastSimDay: absDay(NEW_GAME_CLOCK),
+    stats: { harvests: 0, daysPlayed: 0, brews: 0, sales: 0, ordersDone: 0 },
   };
 }
 
@@ -65,26 +109,48 @@ export interface LoadResult {
   note: string | null;
 }
 
+/** Bring a version-1 save (M4–M5) up to the current format. */
+function migrate(s: Record<string, unknown>): GameStateData {
+  const old = s as unknown as GameStateData & { stores?: Item[] };
+  const day = absDay(old.clock);
+  const fresh = newGame(old.world);
+  const out: GameStateData = { ...fresh, ...old, version: SAVE_VERSION };
+  out.basket = (old.basket ?? []).map((l) => (l.kind === "prep" ? l : upgradeLot(l, day)));
+  out.storage = emptyStorage();
+  // What was unloaded "at the barn" in M5 was hung in the loft.
+  out.storage.loft = (old.stores ?? []).map((l) => upgradeLot(l as never, day)).slice(0, 24);
+  delete (out as unknown as { stores?: unknown }).stores;
+  out.stats = { ...fresh.stats, ...(old.stats ?? {}) };
+  out.lastSimDay = day;
+  return out;
+}
+
 /**
  * Restore a save. If the world has changed since it was written (new plant
- * data or placement code), the record of picked and dug plants no longer
+ * ecology or placement code), the record of picked and dug plants no longer
  * points at the same plants, so it's cleared; everything else is kept.
  */
 export function restore(json: string | null, world: GameStateData["world"]): LoadResult {
   if (!json) return { state: newGame(world), note: null };
   try {
-    const s = JSON.parse(json) as GameStateData;
-    if (s.version !== SAVE_VERSION) return { state: newGame(world), note: "Old save format; starting fresh." };
+    let s = JSON.parse(json) as GameStateData;
+    let note: string | null = null;
+    if (s.version === 1) {
+      s = migrate(s as unknown as Record<string, unknown>);
+      note = "The barn's been fixed up: what you unloaded is hanging in the drying loft.";
+    } else if (s.version !== SAVE_VERSION) {
+      return { state: newGame(world), note: "Old save format; starting fresh." };
+    }
     const same = s.world?.hash === world.hash && s.world.herbs === world.herbs && s.world.woody === world.woody;
     if (!same) {
       s.harvest = emptyHarvestState();
       s.world = world;
-      return { state: s, note: "The land was regrown since your last save (plant data changed), so picked and dug plants are back." };
+      note = "The land was regrown since your last save (plant data changed), so picked and dug plants are back.";
     }
-    s.statuses ??= [];
-    s.stores ??= [];
-    s.stats ??= { harvests: 0, daysPlayed: 0 };
-    return { state: s, note: null };
+    const fresh = newGame(world);
+    for (const k of Object.keys(fresh) as (keyof GameStateData)[]) if (s[k] === undefined) (s as unknown as Record<string, unknown>)[k] = fresh[k];
+    s.storage = { ...emptyStorage(), ...s.storage };
+    return { state: s, note };
   } catch {
     return { state: newGame(world), note: "Couldn't read the save; starting fresh." };
   }
@@ -113,6 +179,11 @@ export function clearStorage() {
   } catch {
     /* nothing to clear */
   }
+}
+
+export function log(s: GameStateData, text: string) {
+  s.ledger.unshift({ day: absDay(s.clock), text });
+  if (s.ledger.length > 40) s.ledger.length = 40;
 }
 
 // ---------------------------------------------------------------- statuses

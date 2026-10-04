@@ -1,4 +1,4 @@
-import { Engine, MeshBuilder, Scene, Vector3 } from "@babylonjs/core";
+import { Color3, Engine, MeshBuilder, PointLight, Scene, Vector3 } from "@babylonjs/core";
 import { createSky } from "./world/sky";
 import { createTerrain } from "./world/terrain";
 import { createHomestead } from "./world/buildings";
@@ -19,6 +19,10 @@ import { setupVrForaging } from "./interact/vr";
 import { Fader } from "./ui/fader";
 import { Toasts } from "./ui/toast";
 import { Satchel } from "./ui/satchel";
+import { StationPanel } from "./ui/stationPanel";
+import { HomesteadProps } from "./world/props";
+import { createColliders } from "./world/colliders";
+import { layout } from "./world/layout";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const loading = document.getElementById("loading")!;
@@ -48,6 +52,16 @@ async function boot() {
   const woody = new WoodyRenderer(scene, sky.shadows);
   const structural = createStructuralWoody(scene, builder, woody);
   builder.mergeStatic();
+  const props = new HomesteadProps(scene, sky.shadows);
+  const colliders = createColliders(scene);
+
+  // Lamplight indoors: one point light that moves to the room you're in, lighting only the buildings.
+  const lamp = new PointLight("lamp", new Vector3(0, -50, 0), scene);
+  lamp.diffuse = new Color3(1, 0.82, 0.6);
+  lamp.specular = new Color3(0.1, 0.08, 0.05);
+  lamp.range = 11;
+  lamp.intensity = 0;
+  lamp.includedOnlyMeshes = scene.meshes.filter((m) => m.name.startsWith("static_") || ["bundles", "jars", "crates", "mortar", "pestle", "pot", "coldJar", "ventDoor"].includes(m.name));
 
   // Invisible walls: teleport rays stop at the fence and the tree line.
   const walls = [
@@ -62,17 +76,19 @@ async function boot() {
 
   if (params.has("new")) clearStorage();
   const resumed = !!loadFromStorage();
-  // New game: on the drive by the road. Resumed: on the porch, where you went to bed.
-  const spawn = resumed ? new Vector3(-42, 0, 60) : new Vector3(-20, 0, 12);
-  spawn.y = heightAt(spawn.x, spawn.z) + EYE_HEIGHT;
+  // New game: on the drive by the road. Resumed: beside the bed, where you went to sleep.
+  const bed = layout().stations.find((st) => st.id === "bed")!;
+  const spawn = resumed ? new Vector3(bed.x, bed.y + EYE_HEIGHT, bed.z) : new Vector3(-20, 0, 12);
+  if (!resumed) spawn.y = heightAt(spawn.x, spawn.z) + EYE_HEIGHT;
   const desktop = createDesktopCamera(scene, canvas, spawn);
   const desktopCam = desktop.camera;
-  if (resumed) desktopCam.setTarget(new Vector3(8, spawn.y, 50));
+  if (resumed) desktopCam.setTarget(new Vector3(spawn.x - 3, spawn.y, spawn.z - 6));
   scene.activeCamera = desktopCam;
 
-  const { xr } = await setupXR(scene, [terrain.mesh]);
+  const { xr } = await setupXR(scene, [terrain.mesh, colliders.floors]);
   if (xr) {
     walls.forEach((w) => xr.teleportation?.addBlockerMesh(w));
+    xr.teleportation?.addBlockerMesh(colliders.blockers);
     xr.baseExperience.onInitialXRPoseSetObservable.add((xrCam) => {
       xrCam.setTransformationFromNonVRCamera(desktopCam, true);
     });
@@ -97,18 +113,22 @@ async function boot() {
     if (xr && cam === xr.baseExperience.camera) {
       xr.baseExperience.camera.position.set(to.x, to.y + xr.baseExperience.camera.realWorldHeight, to.z);
     } else {
-      desktopCam.position.set(to.x, to.y + EYE_HEIGHT, to.z);
-      desktopCam.setTarget(new Vector3(face.x, to.y + EYE_HEIGHT, face.z));
+      desktop.place(to, face);
     }
   };
 
   const satchel = new Satchel(session);
+  new StationPanel(session);
   const input = setupDesktop(scene, canvas, session, {
     isFlying: desktop.isFlying,
+    feet: desktop.feet,
     toggleSatchel: () => satchel.toggle(),
     satchelOpen: () => satchel.open,
   });
-  if (xr) setupVrForaging(scene, xr, session, herbs, toasts);
+  const vr = xr ? setupVrForaging(scene, xr, session, herbs, toasts) : null;
+  session.openJournal = () => (vr && scene.activeCamera === xr!.baseExperience.camera ? vr.showJournal() : satchel.show("journal"));
+  props.update(session.state);
+  session.subscribe(() => props.update(session.state));
 
   let overlay: OverlayMode = (params.get("overlay") as OverlayMode) ?? "natural";
   if (!OVERLAY_CYCLE.includes(overlay)) overlay = "natural";
@@ -124,7 +144,13 @@ async function boot() {
     const cam = scene.activeCamera;
     if (!cam) return;
     const dt = Math.min(0.1, engine.getDeltaTime() / 1000);
+    if (!xr || cam !== xr.baseExperience.camera) session.room = desktop.room();
     session.update(dt, cam.globalPosition);
+    // Lamplight in whichever room you're in: a soft glow by day, the main light at night.
+    const room = session.room;
+    const lampAt = room ? layout().anchors.lamps.find((l) => l.room === room) : null;
+    if (lampAt) lamp.position.set(lampAt.x, lampAt.y, lampAt.z);
+    lamp.intensity = lampAt ? 0.3 + 1.3 * (1 - sky.daylight()) : 0;
     structural.setLight(sky.daylight());
     input.update(dt);
     if (vegetationOn) herbs.update(cam.globalPosition);
@@ -132,7 +158,7 @@ async function boot() {
 
   // --- Debug keys (see README).
   window.addEventListener("keydown", (e) => {
-    if (satchel.open) return;
+    if (satchel.open || session.panel) return;
     const c = session.state.clock;
     switch (e.key) {
       case "z": case "Z":
@@ -167,11 +193,11 @@ async function boot() {
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());
   if (!resumed) {
-    setTimeout(() => toasts.show("March 10. The old place is yours now.", "Look closely at plants to identify them; hold the left mouse button to harvest. Tab opens your satchel. The front door is your bed."), 800);
+    setTimeout(() => toasts.show("March 10. The old place is yours now.", "Look closely at plants to identify them; hold the left mouse button to harvest. Hang what you gather in the barn loft to dry, brew at the bench, sell at the stand. E uses things; Tab opens your satchel. Your bed is upstairs in the house."), 800);
   }
 
   // Handy in the browser console while building.
-  Object.assign(window as unknown as Record<string, unknown>, { scene, engine, sim, herbs, woody, session });
+  Object.assign(window as unknown as Record<string, unknown>, { scene, engine, sim, herbs, woody, session, layout: layout() });
 }
 
 boot().catch((err) => {

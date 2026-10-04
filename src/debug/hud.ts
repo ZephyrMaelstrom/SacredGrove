@@ -66,12 +66,13 @@ export function createHud(ctx: HudContext) {
     const lines: string[] = [];
     const temp = Math.round(temperatureAt(w, st.clock.minutes));
     lines.push(`<b>${formatTime(st.clock.minutes)}</b> · ${formatDoy(st.clock.doy)}, ${seasonName(st.clock.doy)} · Year ${st.clock.year}${s.timelapse ? " · ⏩ time-lapse" : ""}`);
-    lines.push(`${describe(w, st.clock.minutes)} · ${temp} °F · ${zone.name}`);
-    lines.push(`<span class="dim">${TOOL_NAMES[st.tool]}${st.gloves ? " · gloves" : ""} · basket ${s.basketLine()}</span>`);
+    lines.push(`${describe(w, st.clock.minutes)} · ${temp} °F · ${s.placeName(zone.name)}`);
+    lines.push(`<span class="dim">${TOOL_NAMES[st.tool]}${st.gloves ? " · gloves" : ""} · basket ${s.basketLine()} · ${s.moneyLine()}</span>`);
+    if (st.jobs.length) lines.push(`<span class="dim">brewing: ${st.jobs.map((j) => `${j.prep.name} (${Math.max(1, Math.ceil(j.readyAt - s.nowAbsMinute))} min)`).join(", ")}</span>`);
     const statuses = st.statuses.filter((x) => x.until > s.nowAbsMinute).map((x) => x.label);
     if (statuses.length) lines.push(`<span class="warnText">${statuses.join(" · ")}</span>`);
 
-    if (d.interactable) lines.push(`<span class="hint">E · ${d.interactable.label}</span>`);
+    if (d.interactable && !s.panel) lines.push(`<span class="hint">E · ${d.interactable.label}</span>`);
     if (d.target) {
       const t = d.target;
       const a = s.lookOf(t);

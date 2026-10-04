@@ -14,7 +14,9 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | M3 · Vegetation | 94 species placed by habitat fit, phenology for every plant, procedural meshes, streaming renderer, seasonal trees | Done |
 | M4 · Time | Day clock, real sun position, Southern Illinois weather and snowpack, years that differ (early/late springs, frosts), sleep and save | Done |
 | M5 · Forage | Hands/knife/trowel, VR hands and controllers, potency, harvest pressure and multi-year recovery, Field Journal, smell and taste, contact hazards | Done |
-| M6 · Homestead | Barn interior: drying loft, root cellar, tack room; spoilage | Next |
+| M6 · Homestead | Enterable barn, hayloft, tack room, farmhouse and root cellar; drying with airflow and mold; cellar keeping; seed catalog; spoilage everywhere | Done |
+| M7 · Apothecary & stand | Grinding, hot and cold infusions, decoctions; discovered effects and recipes; roadside stand with passers-by; posted orders with feedback; the full loop | Done |
+| M8 · The garden | Seed saving and sowing, beds, germination and tending | Next |
 
 ## Controls
 
@@ -28,7 +30,8 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | Right B or thumbstick click | Next tool (hands → knife → trowel) |
 | Left Y | Gloves on/off |
 | Left X or Menu | Satchel panel: basket (smell / taste / toss), tools, journal |
-| Right A, or pinch at the door / barn | Sleep / unload the basket |
+| Right A, or pinch at a station | Use it: bed, bench, drying racks, vent, jar shelf, seed catalog, cellar, stand. Its panel floats in front of you; point and pull the trigger, or poke, to press |
+| Squeeze/pinch inside the mortar and stir | Grind the herb in it (at the bench) |
 
 **Desktop**
 
@@ -38,8 +41,8 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | Look at a plant | Steady look identifies it; HUD shows its stage and what your tool would take |
 | Hold left mouse | Harvest (within 3 m) |
 | 1 / 2 / 3 · G | Hands / knife / trowel · gloves |
-| E | At the front door: sleep (saves). At the barn doors: unload your basket |
-| Tab or J | Satchel: basket, Field Journal, barn, status |
+| E | Use what's in front of you (bed, bench, racks, vent, shelf, seed catalog, cellar, stand). E or Esc closes the panel; time keeps running |
+| Tab or J | Satchel: basket, Field Journal, recipes, ledger |
 | `` ` `` | Dev view: real names, habitat values, limiting factor, frame budget |
 | Z · X | Habitat overlays · where the plant you're looking at can grow |
 | `[` `]` · `,` `.` · `-` `=` | ±1 week · ±1 day · ±1 hour |
@@ -49,7 +52,7 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 
 ## Time and weather (M4)
 
-- **Clock:** a 6 AM–midnight day lasts about 14 real minutes. The date turns at midnight. Stay up past 2 AM and you pass out and wake on the porch. The front door is your bed; sleeping saves the game (browser storage).
+- **Clock:** a 6 AM–midnight day lasts about 14 real minutes. The date turns at midnight. Stay up past 2 AM and you pass out and wake in bed. Your bed is upstairs in the farmhouse; sleeping saves the game (browser storage).
 - **Sun:** real solar position for Mount Vernon (38.3° N) with daylight saving time, so a June sunrise is 5:35 AM in the northeast and a December noon sun is 28° high.
 - **Weather** (`src/time/climate.ts`): generated per year from approximate Mount Vernon climate normals. Temperatures follow the seasonal normal plus persistent warm and cold spells; wet days cluster; storms come in summer afternoons; it snows only when the day stays near freezing (about 13 inches a year); fog follows still, damp nights. Snow piles up and melts, and covers the ground.
 - **Years differ** (`src/time/season.ts`): a warm spring brings green-up and bloom up to 12 days early, a cold one late. The first frost kills summer annuals overnight, a hard freeze ends the season for perennials and strips the trees, and a late frost on open blossoms means no persimmons, cherries or mulberries that year.
@@ -62,7 +65,41 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 - **The land remembers** (`src/game/harvestState.ts`): picked leaves regrow in two weeks; stripped flowers and fruit are gone for the season; cut plants return next year; dug plants take 1–6 years (slow, conservative perennials longest). Take more than a third of a patch and it comes back thinner for 1–5 years.
 - **Field Journal:** a plant gets a page when you first see it, a name when you examine it or harvest it, and its smell and taste notes only when you test a sample. Tasting is risky: toxic plants make you sick for hours, deadly ones knock you out (you wake at home, basket lost) and the journal records it.
 - **Hazards:** poison ivy (a three-day rash), nettle stings, wild parsnip sap in sunlight (blisters), thorns. Gloves prevent all of it.
-- **Basket:** 4 kg. Unload it at the barn for now; the barn interior with drying, the root cellar and spoilage is M6.
+- **Basket:** 4 kg. Fresh herbs wilt in it; take them home.
+
+## The homestead (M6)
+
+Walk into every building: walls stop you, stairs climb, and the same layout (`src/world/layout.ts`) drives what's drawn, where you can walk (`walk.ts`) and where VR teleport can land.
+
+| Place | What it's for | What time does there |
+| --- | --- | --- |
+| **Hayloft** (barn, up the east stairs) | Hang bundles from the racks to dry | Drying speed follows airflow, the day's humidity, the part (leaves in 3–6 dry days, roots weeks) and crowding. Damp air on wet bundles molds them. **Open the north vent on dry days, shut it in the rain.** Attic heat drives off aromatic oils |
+| **Jar shelf** (barn, by the bench) | Dried herbs and finished brews | Sealed: the best place for dried herbs (they keep most of a year, roots longer) |
+| **Root cellar** (bulkhead stairs, east side of the house) | Roots, tubers, bulbs, fruit; brews keep a few extra days | Cool and damp: keepers stay fresh for months; leaves and flowers rot; dried herbs pick up damp |
+| **Seed catalog** (tack room) | Seed and dried goods | Dry and steady: seeds hold viability. The garden (M8) draws from it |
+| **Stand** (by the road) | For sale | Sun and dust; fresh things wilt fast |
+
+What's stored shows: bundles hang green and turn tan as they dry (gray-white if they mold), jars fill the shelf, crates the cellar, goods the stand. Everything catches up each morning for the days that passed. Overnight news (dried bundles, sales, new orders) comes with the morning toast; the satchel's ledger keeps it.
+
+## The apothecary and the stand (M7)
+
+**The bench** has three pots, a mortar and a stove.
+
+- **Hot infusion** (minutes): good for leaves and flowers. A lid keeps the aromatic oils in; long steeps turn harsh with tannin. Roots and bark give little unless ground.
+- **Cold infusion** (hours): the only way to keep slippery mucilage intact (violet, mallow-type throat coats); weak on most else.
+- **Decoction** (simmered): pulls everything from roots and bark, boils off aromatics, destroys mucilage, and is the only safe way to use must-cook fruit like elderberry. It boils down.
+- **Mortar:** dried material only. Powders give up their compounds faster; over-grinding an aromatic costs potency.
+- What comes out depends on each plant's hidden compounds and effects (from the workbook), dose per cup, freshness and potency. Toxic plants are dangerous in small amounts.
+
+**Learning what things do** — nothing is labeled:
+
+- **Taste a brew.** You feel the stronger effects ("your eyelids grow heavy"). A single-herb brew confirms the effect in the journal; a blend only makes you suspect each ingredient. Harmful brews make you sick or knock you out.
+- **Fill an order.** Customers report back in plain words ("Helped a little. Needed to be stronger." / "too bitter") and single-herb deliveries confirm or rule out an effect.
+- Recipes you've learned something about go in the satchel's **Recipes** tab with their method, proportions and best known strength.
+
+**The stand** sells to passers-by at about 60% of value: more in good weather, on weekends, in the growing season, and as your reputation grows. People look for remedies by season (coughs in winter, rashes in summer), kitchen herbs and nice teas. Collect the cash box in the morning. Sell something harmful and word gets around.
+
+**Orders** are posted on the stand's clipboard most days: a real need ("my grandson's cough"), how much, sometimes "nothing too bitter" or "a hot tea, not a boiled brew", and a due date. Bring the brew or dried herbs in your basket and press Give. Reputation drifts back toward neutral over time; letting orders lapse costs a little, harming someone costs a lot.
 
 ## How the world grows
 
@@ -126,8 +163,14 @@ src/
   main.ts                 boot: worker, world, vegetation, game session, XR, HUD, debug keys
   time/                   clock, climate + weather + snowpack, season effects, sun position
   game/                   save state, harvest rules, harvest pressure, basket, journal, session
-  interact/               desktop and VR foraging controls
-  ui/                     satchel panel, toasts, fade
+    items.ts              herb lots and preparations
+    storage.ts            M6 drying, mold, cellar, spoilage
+    apothecary.ts         M7 grinding, extraction, brewing, tasting
+    market.ts             M7 stand sales, orders, delivery feedback
+    homestead.ts          moving, tasting, brewing, delivering; the daily catch-up
+    stations.ts           station panels as data (rendered by desktop and VR)
+  interact/               desktop and VR controls, VR panels
+  ui/                     satchel, station panel, toasts, fade
   data/plants.ts          typed plant database
   sim/                    pure TypeScript, runs in the worker and in tests
     grid.ts               2 m habitat grid
@@ -143,9 +186,12 @@ src/
     woody.ts              trees and shrubs, seasonal crowns
     wind.ts               wind sway shader plugin
   world/                  map, terrain, buildings, sky, structural woods
+    layout.ts             M6 every wall, floor, stair and station (walk + render + teleport)
+    walk.ts               floors, stairs, walls, gravity
+    props.ts              stored things made visible; colliders.ts for VR teleport
   xr/                     WebXR setup, desktop walker / fly camera
   debug/                  HUD, habitat overlays
-tests/                    ecology, phenology, geometry
+tests/                    ecology, phenology, geometry, climate, foraging, homestead, layout
 ```
 
 ## Develop

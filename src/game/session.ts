@@ -18,13 +18,18 @@ import { appearance, type Appearance } from "../sim/phenology";
 import { weatherOn, weatherForYear, snowDepths, snowCover, type DayWeather } from "../time/climate";
 import { seasonFromWeather, type SeasonAdjust } from "../time/season";
 import { SECONDS_PER_GAME_MINUTE, absDay, formatTime } from "../time/clock";
-import { ZONES, SITE, heightAt } from "../world/map";
+import { money } from "./market";
+import { ZONES, SITE } from "../world/map";
 import type { Terrain } from "../world/terrain";
 import type { Sky } from "../world/sky";
 import type { HerbRenderer } from "../veg/herbs";
 import type { WoodyRenderer } from "../veg/woody";
 import { HarvestState, patchKey, type Layer } from "./harvestState";
-import { harvest, examine, notice, smell, taste, discard, type Target, type ActionResult } from "./forage";
+import { harvest, examine, notice, type Target } from "./forage";
+import { smell, taste, discard, catchUp, finishJobs, type Result as ActionResult } from "./homestead";
+import { actStation, isPanelStation, newDraft, viewStation, type BenchDraft, type PanelView } from "./stations";
+import { layout, ROOM_NAMES, type RoomId, type Station, type StationId } from "../world/layout";
+import { DAYS_IN_YEAR } from "../sim/phenology";
 import { TOOLS, TOOL_NAMES, choose, type Tool } from "./harvest";
 import { basketWeight, BASKET_CAPACITY_G } from "./basket";
 import {
@@ -38,17 +43,13 @@ import type { Toasts } from "../ui/toast";
 const HARVEST_SECONDS: Record<Tool, number> = { hand: 0.45, knife: 0.9, trowel: 1.6 };
 const EXAMINE_SECONDS = 1.6;
 
-export interface Interactable {
-  id: string;
-  label: string;
-  x: number;
-  z: number;
-  radius: number;
-}
+export type Interactable = Station;
 
-export const DOOR: Interactable = { id: "door", label: "Front door — go to bed", x: SITE.farmhouse.x, z: SITE.farmhouse.z - SITE.farmhouse.d / 2 - 1, radius: 2.6 };
-export const BARN: Interactable = { id: "barn", label: "Barn — unload your basket", x: SITE.barn.x, z: SITE.barn.z - SITE.barn.d / 2 - 1.5, radius: 3.2 };
-const PORCH = new Vector3(SITE.farmhouse.x, 0, SITE.farmhouse.z - SITE.farmhouse.d / 2 - 3.5);
+/**
+ * Bump when buildings change footprints (plants are placed around them), so
+ * old saves' picked-plant records, which point at individual plants, reset.
+ */
+export const LAYOUT_VERSION = 6;
 
 interface HarvestHold {
   source: string;
@@ -75,7 +76,17 @@ export class Session {
   paused = false;
   timelapse = false;
   private holds = new Map<string, HarvestHold>();
+  /** Things that happened overnight, shown in the morning. */
+  private pendingNotes: string[] = [];
+  /** Where the player is standing (set by the controls each frame). */
+  room: RoomId | null = null;
+  /** The station panel that's open, if any. */
+  panel: StationId | null = null;
+  draft: BenchDraft = newDraft();
+  /** Open the satchel (desk → journal). Set by the UI. */
+  openJournal: () => void = () => {};
   private examining: { key: string; t: number } | null = null;
+  private lastPanelTick = -1;
   private busy = false;
   /** Called when the player must be moved (waking up at home). */
   movePlayer: (to: Vector3, faceTo: Vector3) => void = () => {};
@@ -99,7 +110,7 @@ export class Session {
     private toasts: Toasts,
     options: { fresh?: boolean } = {},
   ) {
-    const world = { hash: (DATA_HASH ^ WORLD_SEED) >>> 0, herbs: population.herbs.count, woody: woody.count };
+    const world = { hash: (DATA_HASH ^ WORLD_SEED ^ (LAYOUT_VERSION * 0x9e3779b1)) >>> 0, herbs: population.herbs.count, woody: woody.count };
     const loaded = restore(options.fresh ? null : loadFromStorage(), world);
     this.state = loaded.state;
     if (loaded.note) setTimeout(() => toasts.show(loaded.note!), 1500);
@@ -132,9 +143,14 @@ export class Session {
     this.herbs.visibility = (k) => this.harvestState.visibility("h", k, PLANTS[h.plant[k]].latin, h.x[k], h.z[k], year, day);
   }
 
-  /** New date: weather, season, plant looks, visibility. */
+  /** New date: weather, season, plant looks, visibility; the homestead catches up (drying, sales, orders). */
   refreshDay() {
     const c = this.state.clock;
+    const notes = catchUp(this.state, (d) => {
+      const year = Math.floor((d - 1) / DAYS_IN_YEAR) + 1, doy = ((d - 1) % DAYS_IN_YEAR) + 1;
+      return { w: weatherOn(year, doy, WORLD_SEED), doy };
+    });
+    this.pendingNotes.push(...notes);
     this.weather = weatherOn(c.year, c.doy, WORLD_SEED);
     this.season = seasonFromWeather(weatherForYear(c.year, WORLD_SEED));
     this.snowCm = snowDepths(c.year, WORLD_SEED)[c.doy - 1];
@@ -157,8 +173,16 @@ export class Session {
       if (ev.newYear) this.harvestState.rollover(this.state.clock.year);
       if (ev.newDay) this.refreshDay();
       if (ev.passedOut && !this.timelapse) void this.passOut();
+      const done = finishJobs(this.state);
+      for (const r of done) this.toasts.show(r.message, r.detail);
+      if (done.length) this.emit();
+      // Panels with timers (brewing) refresh a couple of times a game hour.
+      if (this.panel === "bench" && this.state.jobs.length && Math.floor(this.state.clock.minutes) % 5 === 0 && this.lastPanelTick !== Math.floor(this.state.clock.minutes)) {
+        this.lastPanelTick = Math.floor(this.state.clock.minutes);
+        this.emit();
+      }
     }
-    this.sky.update({ doy: this.state.clock.doy, minutes: this.state.clock.minutes, weather: this.weather }, cameraPos, dt);
+    this.sky.update({ doy: this.state.clock.doy, minutes: this.state.clock.minutes, weather: this.weather, indoors: this.room !== null }, cameraPos, dt);
     for (const hold of this.holds.values()) hold.t += dt;
   }
 
@@ -299,28 +323,59 @@ export class Session {
     this.emit();
   }
 
-  // ------------------------------------------------------------ places
+  // ------------------------------------------------------------ places & stations
 
-  nearbyInteractable(x: number, z: number): Interactable | null {
-    for (const it of [DOOR, BARN]) if (Math.hypot(x - it.x, z - it.z) <= it.radius) return it;
-    return null;
+  /** The station within reach of someone standing at (x, feetY, z). */
+  nearbyInteractable(x: number, z: number, feetY?: number): Interactable | null {
+    let best: Interactable | null = null, bestD = Infinity;
+    for (const st of layout().stations) {
+      if (feetY !== undefined && Math.abs(feetY - st.y) > 1.3) continue;
+      const d = Math.hypot(x - st.x, z - st.z);
+      if (d <= st.radius && d < bestD) { best = st; bestD = d; }
+    }
+    return best;
+  }
+
+  /** Is the open panel's station still within reach (with a little slack)? */
+  panelInReach(x: number, z: number, feetY: number): boolean {
+    const st = layout().stations.find((s) => s.id === this.panel);
+    return !!st && Math.abs(feetY - st.y) < 1.5 && Math.hypot(x - st.x, z - st.z) <= st.radius + 1;
   }
 
   interact(it: Interactable) {
-    if (it.id === "door") void this.sleep();
-    if (it.id === "barn") this.unload();
+    switch (it.id) {
+      case "bed": void this.sleep(); return;
+      case "desk": this.openJournal(); return;
+      case "gloves": this.toggleGloves(); return;
+      case "vent": this.stationAct("vent", "loft"); return;
+    }
+    if (isPanelStation(it.id)) this.openPanel(it.id);
   }
 
-  /** Placeholder storage until the barn interior (M6): the basket empties into the barn stores. */
-  unload() {
-    const s = this.state;
-    if (!s.basket.length) return this.toasts.show("Your basket is empty.");
-    const grams = basketWeight(s.basket);
-    s.stores ??= [];
-    s.stores.push(...s.basket);
-    s.basket = [];
-    this.toasts.show(`Unloaded ${grams} g into the barn.`, "Drying racks and the root cellar come with the barn interior (M6).");
+  openPanel(id: StationId | null) {
+    this.panel = id;
     this.emit();
+  }
+
+  panelView(): PanelView | null {
+    return this.panel ? viewStation(this.state, this.panel, this.draft, { weather: this.weather }) : null;
+  }
+
+  stationAct(act: string, station: StationId | null = this.panel) {
+    if (act === "close") return this.openPanel(null);
+    if (!station) return;
+    const r = actStation(this.state, station, this.draft, act);
+    if (r) this.report(r);
+    else this.emit();
+    if (r?.collapse) {
+      this.panel = null;
+      void this.wakeAtHome("You collapsed.");
+    }
+  }
+
+  /** Name of where you are, for the HUD. */
+  placeName(zoneName: string) {
+    return this.room ? ROOM_NAMES[this.room] : zoneName;
   }
 
   // ------------------------------------------------------------ sleep
@@ -332,9 +387,10 @@ export class Session {
       this.toasts.show("It's still daylight, but you turn in early.");
     }
     this.busy = true;
+    this.panel = null;
     await this.fader.out();
     this.endDay();
-    this.toasts.show(this.morningLine(), "Game saved.");
+    this.toasts.show(this.morningLine(), this.overnight() ?? "Game saved.");
     await this.fader.in();
     this.busy = false;
   }
@@ -354,15 +410,31 @@ export class Session {
   private async wakeAtHome(why: string) {
     if (this.busy) return;
     this.busy = true;
+    this.panel = null;
     this.toasts.show(why);
     await this.fader.out();
     this.endDay();
-    const to = PORCH.clone();
-    to.y = heightAt(to.x, to.z);
-    this.movePlayer(to, new Vector3(SITE.barn.x, to.y, SITE.barn.z));
-    this.toasts.show(`You wake on the porch. ${this.morningLine()}`, "Game saved.");
+    this.moveToBed();
+    this.toasts.show(`You wake in your own bed. ${this.morningLine()}`, this.overnight() ?? "Game saved.");
     await this.fader.in();
     this.busy = false;
+  }
+
+  /** Put the player beside the bed, facing the window. */
+  moveToBed() {
+    const bed = layout().stations.find((s) => s.id === "bed")!;
+    this.movePlayer(new Vector3(bed.x, bed.y, bed.z), new Vector3(SITE.farmhouse.x, bed.y, SITE.farmhouse.z - 10));
+  }
+
+  /** The overnight news (sales, orders, drying), condensed for a toast. */
+  private overnight(): string | null {
+    const n = this.pendingNotes.splice(0);
+    if (!n.length) return null;
+    const dry = n.filter((x) => / is dry\.$/.test(x)).length;
+    const rest = n.filter((x) => !/ is dry\.$/.test(x));
+    const lines = [...rest.slice(0, 3), ...(dry ? [`${dry} bundle${dry > 1 ? "s are" : " is"} dry.`] : [])];
+    if (rest.length > 3) lines.push(`(+${rest.length - 3} more in the ledger)`);
+    return lines.join(" ");
   }
 
   private morningLine() {
@@ -384,6 +456,9 @@ export class Session {
 
   basketLine() {
     return `${(basketWeight(this.state.basket) / 1000).toFixed(1)} / ${BASKET_CAPACITY_G / 1000} kg`;
+  }
+  moneyLine() {
+    return `${money(this.state.money)} · reputation ${Math.round(this.state.reputation)}`;
   }
   get nowAbsMinute() {
     return absMinute(this.state.clock);

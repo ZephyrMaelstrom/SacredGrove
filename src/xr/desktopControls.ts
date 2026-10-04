@@ -1,9 +1,14 @@
 import { Scene, UniversalCamera, Vector3 } from "@babylonjs/core";
-import { WALKABLE, heightAt } from "../world/map";
+import { heightAt } from "../world/map";
+import { step, surfaceAt, type Walker } from "../world/walk";
+import type { RoomId } from "../world/layout";
 
 export const EYE_HEIGHT = 1.7;
 
-/** WASD + mouse-look walker for testing in a normal browser. */
+/**
+ * WASD + mouse-look walker for testing in a normal browser. Walks on the
+ * ground and on floors, climbs stairs, stops at walls (see world/walk.ts).
+ */
 export function createDesktopCamera(scene: Scene, canvas: HTMLCanvasElement, start: Vector3) {
   const cam = new UniversalCamera("desktopCam", start, scene);
   cam.minZ = 0.05;
@@ -23,16 +28,26 @@ export function createDesktopCamera(scene: Scene, canvas: HTMLCanvasElement, sta
     if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
   });
 
+  const feet0 = start.y - EYE_HEIGHT;
+  let walker: Walker = { x: start.x, z: start.z, feet: surfaceAt(start.x, start.z, feet0)?.y ?? feet0, vy: 0, room: null };
+
   let sprint = false;
   // Fly mode (F, or ?fly in the URL): free camera for checking the map from
-  // above. Q / E move down / up. Walking rules (ground, fences) are off.
+  // above. Q / E move down / up. Walking rules (ground, walls) are off.
   let fly = new URLSearchParams(location.search).has("fly");
   let rise = 0;
   window.addEventListener("keydown", (e) => {
     if (e.key === "Shift") sprint = true;
-    if (e.key === "f" || e.key === "F") fly = !fly;
-    if (e.key === "e" || e.key === "E") rise = 1;
-    if (e.key === "q" || e.key === "Q") rise = -1;
+    if (e.key === "f" || e.key === "F") {
+      fly = !fly;
+      if (!fly) {
+        // Land on whatever is below.
+        const p = cam.position;
+        walker = { x: p.x, z: p.z, feet: surfaceAt(p.x, p.z, p.y)?.y ?? heightAt(p.x, p.z), vy: 0, room: null };
+      }
+    }
+    if (fly && (e.key === "e" || e.key === "E")) rise = 1;
+    if (fly && (e.key === "q" || e.key === "Q")) rise = -1;
   });
   window.addEventListener("keyup", (e) => {
     if (e.key === "Shift") sprint = false;
@@ -46,14 +61,22 @@ export function createDesktopCamera(scene: Scene, canvas: HTMLCanvasElement, sta
       cam.position.y = Math.max(heightAt(cam.position.x, cam.position.z) + 0.5, cam.position.y + rise * cam.speed);
       return;
     }
-    clampToWalkable(cam.position);
-    cam.position.y = heightAt(cam.position.x, cam.position.z) + EYE_HEIGHT;
+    const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000);
+    walker = step(walker, cam.position.x, cam.position.z, dt);
+    cam.position.set(walker.x, walker.feet + EYE_HEIGHT, walker.z);
   });
-  return { camera: cam, isFlying: () => fly };
-}
 
-/** Keeps a position inside the walkable area (tree line and fence are walls). */
-export function clampToWalkable(p: Vector3) {
-  p.x = Math.min(WALKABLE.maxX, Math.max(WALKABLE.minX, p.x));
-  p.z = Math.min(WALKABLE.maxZ, Math.max(WALKABLE.minZ, p.z));
+  return {
+    camera: cam,
+    isFlying: () => fly,
+    /** Where your feet are and which room you're in. */
+    feet: () => walker.feet,
+    room: (): RoomId | null => (fly ? null : walker.room),
+    /** Put the walker somewhere (waking up, loading). */
+    place(feet: Vector3, faceTo?: Vector3) {
+      walker = { x: feet.x, z: feet.z, feet: feet.y, vy: 0, room: null };
+      cam.position.set(feet.x, feet.y + EYE_HEIGHT, feet.z);
+      if (faceTo) cam.setTarget(new Vector3(faceTo.x, feet.y + EYE_HEIGHT, faceTo.z));
+    },
+  };
 }

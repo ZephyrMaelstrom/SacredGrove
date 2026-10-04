@@ -25,6 +25,12 @@ export interface JournalEntry {
   best: Record<string, number>;
   /** Things you learned the hard way. */
   notes: string[];
+  /** Effects you've confirmed, by product id (from tasting single-herb brews or customer reports). */
+  effects?: Record<string, string[]>;
+  /** Effects you suspect (felt in a blend that included this product). */
+  suspected?: Record<string, string[]>;
+  /** Effects you've seen it fail at. */
+  doesnt?: Record<string, string[]>;
 }
 
 export type Journal = Record<string, JournalEntry>;
@@ -104,4 +110,32 @@ export function recordTaste(j: Journal, plant: Plant, product: Product, day: num
 
 export function recordSmell(j: Journal, plant: Plant, product: Product, day: number) {
   addOnce(entryFor(j, plant, day).smelled, product.id);
+}
+
+/** Record what you learned about a product's effects. */
+export function learnEffect(j: Journal, plant: Plant, productId: string, tag: string, day: number, how: "confirmed" | "suspected" | "doesnt") {
+  const e = entryFor(j, plant, day);
+  const field = how === "confirmed" ? "effects" : how;
+  const map = (e[field] ??= {});
+  const list = (map[productId] ??= []);
+  addOnce(list, tag);
+  if (how === "confirmed") {
+    // Confirmed beats suspected / disproved.
+    if (e.suspected?.[productId]) e.suspected[productId] = e.suspected[productId].filter((t) => t !== tag);
+    if (e.doesnt?.[productId]) e.doesnt[productId] = e.doesnt[productId].filter((t) => t !== tag);
+  }
+}
+
+export interface Protocol {
+  key: string;
+  name: string;
+  method: string;
+  ingredients: { productId: string; name: string; share: number }[];
+  waterMl: number;
+  minutes: number;
+  covered: boolean;
+  /** Best result known for each effect (player-known only). */
+  best: Record<string, number>;
+  made: number;
+  notes: string[];
 }

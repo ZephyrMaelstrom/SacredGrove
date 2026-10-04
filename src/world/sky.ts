@@ -72,6 +72,8 @@ export interface Environment {
   doy: number;
   minutes: number;
   weather: DayWeather;
+  /** Under a roof: no rain or snow falling on you. */
+  indoors?: boolean;
 }
 
 export interface Sky {
@@ -228,8 +230,9 @@ export function createSky(scene: Scene): Sky {
       const isSnow = w.condition === "snow";
       (rain.emitter as Vector3).copyFrom(cam);
       (snow.emitter as Vector3).copyFrom(cam);
-      rain.emitRate = raining && !isSnow ? 2600 * precipRate : 0;
-      snow.emitRate = raining && isSnow ? 900 * precipRate : 0;
+      const open = !env.indoors;
+      rain.emitRate = raining && !isSnow && open ? 2600 * precipRate : 0;
+      snow.emitRate = raining && isSnow && open ? 900 * precipRate : 0;
       const windX = (w.wind - 0.4) * 2.2;
       rain.direction1.set(windX * 0.08, -1, 0.02);
       rain.direction2.set(windX * 0.12, -1, 0.05);

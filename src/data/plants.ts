@@ -32,7 +32,22 @@ export interface Product {
   rarity: number;
   basePrice: number;
   shelfLifeDays: number;
+  /** What a preparation of it does, 0–1 by effect tag (hidden from the player until learned). */
+  effects: Partial<Record<EffectTag, number>>;
+  /** Raw is harmful: must be cooked (simmered) first. */
+  cookOnly: boolean;
 }
+
+export const EFFECT_TAGS = [
+  "sleep", "calm", "digestion", "cough", "fever", "wound", "skin", "pain", "immunity", "stamina",
+  "kidney", "flavor", "food", "dye", "repellent", "toxic",
+] as const;
+export type EffectTag = (typeof EFFECT_TAGS)[number];
+export const EFFECT_WORDS: Record<EffectTag, string> = {
+  sleep: "sleep", calm: "calming", digestion: "digestion", cough: "cough & throat", fever: "fever", wound: "wounds & bleeding",
+  skin: "skin & rashes", pain: "pain", immunity: "colds & infection", stamina: "strength & stamina", kidney: "kidneys",
+  flavor: "flavor", food: "food", dye: "dye", repellent: "pest repellent", toxic: "toxic",
+};
 
 export interface Plant {
   latin: string;

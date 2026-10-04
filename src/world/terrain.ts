@@ -1,4 +1,5 @@
 import { Mesh, Scene, StandardMaterial, VertexData, Color3 } from "@babylonjs/core";
+import { inTerrainHole } from "./layout";
 import { MAP, SITE, type ZoneId, distToDrive, distToPolyline, fbm, heightAt, noise2, zoneAt } from "./map";
 
 export type RGB = [number, number, number];
@@ -129,6 +130,8 @@ export function createTerrain(scene: Scene): Terrain {
 
   for (let j = 0; j < nz - 1; j++) {
     for (let i = 0; i < nx - 1; i++) {
+      // The ground is cut away over the root cellar and its stairwell.
+      if (inTerrainHole(x0 + (i + 0.5) * step, z0 + (j + 0.5) * step)) continue;
       const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
       indices.push(a, b, c, b, d, c);
     }

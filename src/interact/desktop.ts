@@ -5,7 +5,8 @@
  *   hold left mouse      → harvest with the tool in hand (within arm's reach)
  *   1 / 2 / 3            → hands / knife / trowel
  *   G                    → gloves on/off
- *   E                    → use the door (sleep) or barn (unload) when close
+ *   E                    → use what's in front of you (bed, bench, racks,
+ *                          cellar shelves, seed catalog, stand…); E or Esc closes
  *   Tab or J             → the satchel: basket, journal, barn, how you feel
  */
 import { Vector3, type Scene } from "@babylonjs/core";
@@ -28,7 +29,7 @@ export function setupDesktop(
   scene: Scene,
   canvas: HTMLCanvasElement,
   session: Session,
-  opts: { isFlying: () => boolean; toggleSatchel: () => void; satchelOpen: () => boolean },
+  opts: { isFlying: () => boolean; feet: () => number; toggleSatchel: () => void; satchelOpen: () => boolean },
 ) {
   let mouseDown = false;
   const st: DesktopState = { target: null, targetDistance: Infinity, harvestProgress: 0, examineProgress: 0, interactable: null };
@@ -56,7 +57,8 @@ export function setupDesktop(
       case "3": session.setTool("trowel"); break;
       case "g": case "G": session.toggleGloves(); break;
       case "e": case "E":
-        if (!opts.isFlying() && st.interactable) session.interact(st.interactable);
+        if (session.panel) session.openPanel(null);
+        else if (!opts.isFlying() && st.interactable) session.interact(st.interactable);
         break;
     }
   });
@@ -71,7 +73,15 @@ export function setupDesktop(
         return st;
       }
       const p = cam.globalPosition;
-      st.interactable = session.nearbyInteractable(p.x, p.z);
+      st.interactable = opts.isFlying() ? null : session.nearbyInteractable(p.x, p.z, opts.feet());
+      // Walk away from a station and its panel closes.
+      if (session.panel && !session.panelInReach(p.x, p.z, opts.feet())) session.openPanel(null);
+      if (session.panel) {
+        st.target = null;
+        st.harvestProgress = 0;
+        session.release("desktop");
+        return st;
+      }
       const dir = cam.getDirection(Vector3.Forward());
       const gp = groundHit(p.x, p.y, p.z, dir.x, dir.y, dir.z, LOOK + 2);
       st.target = null;

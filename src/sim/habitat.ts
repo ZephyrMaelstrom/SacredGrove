@@ -72,7 +72,7 @@ export function builtFootprints(): Rect[] {
   const fh = SITE.farmhouse, bn = SITE.barn, fs = SITE.farmStand;
   const rects: Rect[] = [
     { name: "farmhouse", x0: fh.x - fh.w / 2, x1: fh.x + fh.w / 2, z0: fh.z - fh.d / 2 - 2.6, z1: fh.z + fh.d / 2, height: 9 },
-    { name: "rootcellar", x0: fh.x + fh.w / 2, x1: fh.x + fh.w / 2 + 2, z0: fh.z - 2.6, z1: fh.z - 0.4, height: 0.8 },
+    { name: "rootcellar", x0: fh.x + fh.w / 2, x1: fh.x + fh.w / 2 + 3, z0: fh.z - 6, z1: fh.z, height: 0.8 },
     { name: "barn", x0: bn.x - bn.w / 2, x1: bn.x + bn.w / 2, z0: bn.z - bn.d / 2, z1: bn.z + bn.d / 2, height: 10.5 },
     { name: "tackroom", x0: bn.x - bn.w / 2 - 4, x1: bn.x - bn.w / 2, z0: bn.z - 8, z1: bn.z, height: 3.5 },
     { name: "farmstand", x0: fs.x - 1.7, x1: fs.x + 1.7, z0: fs.z - 0.7, z1: fs.z + 0.7, height: 2.3 },

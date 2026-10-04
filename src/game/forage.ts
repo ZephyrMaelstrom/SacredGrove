@@ -1,10 +1,9 @@
 /**
- * Foraging actions, tying the rules to the save: harvest a plant, examine it,
- * smell or taste a sample from the basket. Pure TypeScript; the desktop and
- * VR controls both call these.
+ * Foraging actions, tying the rules to the save: harvest a plant, examine it.
+ * (Smelling, tasting and everything done with what you've gathered lives in
+ * homestead.ts.) Pure TypeScript; desktop and VR controls both call these.
  */
 import type { Plant } from "../data/plants";
-import { PLANTS } from "../data/plants";
 import type { Appearance } from "../sim/phenology";
 import type { SeasonAdjust } from "../time/season";
 import { monthOf, type DayWeather } from "../time/climate";
@@ -12,9 +11,11 @@ import { absDay } from "../time/clock";
 import { mixSeed } from "../sim/random";
 import { choose, contactHazard, isUnripe, potency, yieldGrams, TOOL_NAMES, type PlantContext } from "./harvest";
 import type { HarvestState, Layer } from "./harvestState";
-import { addToBasket, removeLot, basketWeight, BASKET_CAPACITY_G, type Lot } from "./basket";
-import { identify, note, recordHarvest, recordSmell, recordTaste, tasteOutcome, entryFor } from "./journal";
+import { addToBasket, basketWeight, BASKET_CAPACITY_G, type Lot } from "./basket";
+import { isHerb } from "./items";
+import { identify, note, recordHarvest, entryFor } from "./journal";
 import { addStatus, hasStatus, type GameStateData } from "./state";
+export type { ActionResult as Result };
 
 export interface Target {
   layer: Layer;
@@ -91,7 +92,7 @@ export function harvest(s: GameStateData, hs: HarvestState, t: Target, w: World)
   if (pressure > 0.25 && pressure <= 0.34) details.push("This patch is getting thin. Leave some to seed.");
   if (pressure > 0.34) details.push("You've taken more than a third of this patch. It will come back thinner.");
 
-  const lot = s.basket.find((l) => l.productId === product.id && l.harvestedDay === day);
+  const lot = s.basket.find((l): l is Lot => isHerb(l) && l.productId === product.id && l.harvestedDay === day);
   return {
     ok: true,
     message: `${product.name} (${product.part.toLowerCase()}) · ${added} g · potency ${pot}% · ${TOOL_NAMES[s.tool]}`,
@@ -116,38 +117,3 @@ export function notice(s: GameStateData, t: Target) {
   if (!e.zones.includes(t.zone)) e.zones.push(t.zone);
 }
 
-const productOf = (lot: Lot) => {
-  const plant = PLANTS.find((p) => p.latin === lot.latin)!;
-  return { plant, product: plant.products.find((p) => p.id === lot.productId)! };
-};
-
-export function smell(s: GameStateData, lotId: string): ActionResult {
-  const lot = s.basket.find((l) => l.id === lotId);
-  if (!lot) return { ok: false, message: "" };
-  const { plant, product } = productOf(lot);
-  recordSmell(s.journal, plant, product, absDay(s.clock));
-  return { ok: true, message: `${product.name} smells: ${product.smell || "of very little"}.` };
-}
-
-export function taste(s: GameStateData, lotId: string): ActionResult {
-  const lot = s.basket.find((l) => l.id === lotId);
-  if (!lot) return { ok: false, message: "" };
-  if (hasStatus(s, "nauseous") || hasStatus(s, "recovering")) return { ok: false, message: "Your stomach can't take another taste right now." };
-  const { plant, product } = productOf(lot);
-  const out = tasteOutcome(product);
-  recordTaste(s.journal, plant, product, absDay(s.clock), out);
-  // A taste uses a pinch of the sample.
-  lot.grams = Math.max(0, lot.grams - 1);
-  if (lot.grams === 0) removeLot(s.basket, lot.id);
-  if (out.status) addStatus(s, out.status.id, out.status.label, out.status.minutes);
-  if (out.severity === "collapse") {
-    s.basket.length = 0; // you dropped everything where you fell
-    return { ok: true, message: out.message, collapse: true };
-  }
-  return { ok: true, message: out.severity === "none" ? `${product.name} — ${out.message}` : out.message };
-}
-
-export function discard(s: GameStateData, lotId: string): ActionResult {
-  const lot = removeLot(s.basket, lotId);
-  return lot ? { ok: true, message: `Tossed ${lot.grams} g of ${lot.productName}.` } : { ok: false, message: "" };
-}
