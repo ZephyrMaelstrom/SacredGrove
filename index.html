@@ -6,19 +6,48 @@
     <title>Rootwake · SacredGrove</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
     <style>
+      :root { --ink: #eef0e6; --dim: #c8ccbd; --panel: rgba(20, 28, 20, 0.66); --accent: #f0d36a; --warn: #e8a888; }
       html, body { margin: 0; height: 100%; overflow: hidden; background: #bcc7d1; font-family: system-ui, sans-serif; }
       #renderCanvas { width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
       #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #2f4a2b; color: #e9e4d4;
                  font-size: 18px; letter-spacing: .04em; transition: opacity .6s; z-index: 10; text-align: center; padding: 24px; }
       #loading.hidden { opacity: 0; pointer-events: none; }
-      #hud { position: fixed; left: 12px; top: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.62);
-             color: #eef0e6; font-size: 13px; line-height: 1.45; pointer-events: none; min-width: 180px; }
-      #hud .dim { color: #c8ccbd; font-size: 12px; }
-      #hud { max-width: 46vw; }
+      #hud { position: fixed; left: 12px; top: 12px; padding: 8px 12px; border-radius: 8px; background: var(--panel);
+             color: var(--ink); font-size: 13px; line-height: 1.5; pointer-events: none; min-width: 200px; max-width: 46vw; }
+      .dim { color: var(--dim); font-size: 12px; }
+      .hint { color: var(--accent); font-size: 12px; }
+      .warnText { color: var(--warn); }
       #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
                    background: rgba(255,255,255,.75); box-shadow: 0 0 0 1px rgba(0,0,0,.35); pointer-events: none; }
-      #help { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.55);
-              color: #dfe3d6; font-size: 12px; line-height: 1.5; pointer-events: none; }
+      #crosshair.ring { width: 22px; height: 22px; margin: -11px 0 0 -11px;
+                        -webkit-mask: radial-gradient(circle, transparent 6px, #000 7px); mask: radial-gradient(circle, transparent 6px, #000 7px); }
+      #help { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: rgba(20,28,20,.5);
+              color: #dfe3d6; font-size: 11.5px; line-height: 1.55; pointer-events: none; max-width: 60vw; }
+      #toasts { position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); display: flex; flex-direction: column;
+                gap: 6px; align-items: center; pointer-events: none; width: min(560px, 90vw); }
+      .toast { background: var(--panel); color: var(--ink); padding: 8px 14px; border-radius: 8px; font-size: 13px; line-height: 1.45;
+               text-align: center; transition: opacity .9s; }
+      .toast span { color: var(--dim); font-size: 12px; }
+      .toast.fade { opacity: 0; }
+      #satchel { position: fixed; inset: 6vh 12vw; background: rgba(24, 32, 22, 0.95); color: var(--ink); border-radius: 12px;
+                 display: none; flex-direction: column; font-size: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.4); z-index: 5; }
+      #satchel.open { display: flex; }
+      .satchel-head { display: flex; gap: 6px; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.1); }
+      .satchel-head .close { margin-left: auto; }
+      .satchel-body { overflow-y: auto; padding: 8px 18px 18px; }
+      #satchel button { background: #3d5a36; color: var(--ink); border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+      #satchel button.on { background: #6b8f4e; }
+      #satchel button.warn { background: #7a3a2a; }
+      #satchel table { width: 100%; border-collapse: collapse; }
+      #satchel td { padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
+      #satchel td.acts { white-space: nowrap; text-align: right; }
+      #satchel td.acts button { margin-left: 4px; }
+      .pot { display: inline-block; width: 60px; height: 6px; background: rgba(255,255,255,.15); border-radius: 3px; vertical-align: middle; }
+      .pot span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+      .entry { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.07); line-height: 1.5; }
+      .entry ul { margin: 6px 0 0; padding-left: 18px; }
+      .entry.unknown { opacity: .75; }
+      @media (max-width: 700px) { #satchel { inset: 4vh 3vw; } #help { display: none; } }
     </style>
   </head>
   <body>
@@ -26,7 +55,9 @@
     <div id="loading">Rootwake<br /><small>Cedar Branch Road</small><br /><small id="loadingStatus">loading…</small></div>
     <div id="crosshair"></div>
     <div id="hud"></div>
-    <div id="help">Click to look · WASD walk · Shift hurry · aim at a plant to identify it<br />Z habitat overlays · X where this plant can grow · [ ] ±1 week · , . ±1 day · V vegetation on/off · F fly (Q/E down/up)<br />On a headset: press the VR button (bottom right)</div>
+    <div id="toasts"></div>
+    <div id="satchel"></div>
+    <div id="help">Click to look · WASD walk · Shift hurry · look at a plant to identify it · hold left click to harvest<br />1 hands · 2 knife · 3 trowel · G gloves · E door (sleep) / barn (unload) · Tab satchel &amp; journal<br />Debug: ` dev view · Z overlays · X where it grows · [ ] week · , . day · - = hour · T time-lapse · V plants · F fly</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

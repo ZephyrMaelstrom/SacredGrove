@@ -52,14 +52,16 @@ export function createStructuralWoody(scene: Scene, builder: Builder, woody: Woo
 
   // --- Fencerow posts and three strands of barbed wire on both property lines.
   const wireMat = new Color3(0.35, 0.34, 0.33);
+  const wires: import("@babylonjs/core").LinesMesh[] = [];
   for (const side of [-1, 1]) {
     postFence(builder, `fencerow_${side < 0 ? "west" : "east"}_posts`, [[side * 72.5, 15], [side * 72.5, 368]], 3, 0);
     for (let s = 0; s < 3; s++) {
       const pts: Vector3[] = [];
       for (let z = 15; z <= 368; z += 3) pts.push(new Vector3(side * 72.5, heightAt(side * 72.5, z) + 0.45 + s * 0.32, z));
       const wire = MeshBuilder.CreateLines(`wire_${side}_${s}`, { points: pts }, scene);
-      wire.color = wireMat;
+      wire.color = wireMat.clone();
       wire.parent = root;
+      wires.push(wire);
       wire.isPickable = false;
     }
   }
@@ -77,5 +79,10 @@ export function createStructuralWoody(scene: Scene, builder: Builder, woody: Woo
     log.parent = root;
     log.isPickable = false;
   }
-  return root;
+  // Lines are unlit, so dim them with the daylight or they glow at night.
+  const setLight = (daylight: number) => {
+    const k = 0.15 + 0.85 * daylight;
+    for (const w of wires) w.color.set(wireMat.r * k, wireMat.g * k, wireMat.b * k);
+  };
+  return { root, setLight };
 }

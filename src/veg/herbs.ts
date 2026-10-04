@@ -17,6 +17,7 @@
 import { Color3, Material, Mesh, Scene, StandardMaterial, VertexData, type Vector3 } from "@babylonjs/core";
 import { PLANTS } from "../data/plants";
 import { appearance, type Appearance, type Visual } from "../sim/phenology";
+import { NEUTRAL_SEASON, type SeasonAdjust } from "../time/season";
 import type { InstanceSet, Population } from "../sim/placement";
 import { NONE } from "../sim/placement";
 import { MOW, type HabitatLayers } from "../sim/habitat";
@@ -146,11 +147,21 @@ export class HerbRenderer {
     return (bx + 512) * 4096 + (bz + 512);
   }
 
-  /** Recompute every plant's look for the date and force a refill. */
-  setDay(doy: number) {
-    if (doy === this.doy) return;
+  /**
+   * Per-individual overrides from the player's harvesting (hidden when cut or
+   * dug, smaller when picked over, flowers gone when stripped). Set by the
+   * game session; null when nothing has been harvested.
+   */
+  visibility: ((index: number) => { hidden: boolean; reduced: boolean; bare: boolean }) | null = null;
+
+  private season: SeasonAdjust = NEUTRAL_SEASON;
+
+  /** Recompute every plant's look for the date (and this year's season) and force a refill. */
+  setDay(doy: number, season: SeasonAdjust = this.season) {
+    if (doy === this.doy && season === this.season) return;
     this.doy = doy;
-    this.look = PLANTS.map((p) => [appearance(p, doy, 0), appearance(p, doy, 1)]);
+    this.season = season;
+    this.look = PLANTS.map((p) => [appearance(p, doy, 0, season), appearance(p, doy, 1, season)]);
     this.tuftColorByPlant = PLANTS.map((p, i) => fieldColor(p, this.look[i][1]));
     this.tuftHeightByPlant = PLANTS.map((p, i) => {
       const a = this.look[i][1];
@@ -180,6 +191,15 @@ export class HerbRenderer {
   }
 
   private enabled = true;
+  private snow = 0;
+
+  /** Snow cover 0–1: whitens the sward and buries low plants. */
+  setSnow(cover: number) {
+    if (Math.abs(cover - this.snow) < 0.01) return;
+    this.snow = cover;
+    this.lastCentre = null;
+    this.lastFarCentre = null;
+  }
 
   /** Hide or show all herbaceous vegetation (debug / performance comparison). */
   setEnabled(on: boolean) {
@@ -206,6 +226,7 @@ export class HerbRenderer {
     const h = this.herbs;
     const b0x = Math.floor((cx - R) / BUCKET), b1x = Math.floor((cx + R) / BUCKET);
     const b0z = Math.floor((cz - R) / BUCKET), b1z = Math.floor((cz + R) / BUCKET);
+    const vis = this.visibility;
     let visible = 0;
     for (let bx = b0x; bx <= b1x; bx++) for (let bz = b0z; bz <= b1z; bz++) {
       const list = this.buckets.get(this.bucketKey(bx, bz));
@@ -217,11 +238,20 @@ export class HerbRenderer {
         const pi = h.plant[k];
         const a = this.look[pi][h.cohort[k]];
         if (!a.visual) continue;
+        let visual = a.visual, shrink = 1;
+        if (vis) {
+          const v = vis(k);
+          if (v.hidden) continue;
+          if (v.reduced) shrink = 0.68;
+          if ((v.reduced || v.bare) && (visual === "flowering" || visual === "fruiting")) visual = "vegetative";
+        }
+        // Deep snow buries anything short.
+        if (this.snow > 0.5 && PLANTS[pi].height * a.growth < 0.25 * this.snow) continue;
         const fade = d > R - FADE ? (R - d) / FADE : 1;
-        const s = h.scale[k] * a.growth * fade;
+        const s = h.scale[k] * a.growth * fade * shrink;
         if (s < 0.02) continue;
         const sy = s * this.cut[k];
-        const proto = this.proto(pi, a.visual);
+        const proto = this.proto(pi, visual);
         if (proto.count === proto.capacity) this.growProto(proto);
         const o = proto.count++ * 16, m = proto.buffer;
         const c = Math.cos(h.rotY[k]), sn = Math.sin(h.rotY[k]);
@@ -285,8 +315,9 @@ export class HerbRenderer {
         const x = nodeX(i);
         const d = Math.hypot(x - cx, z - cz);
         if (d > outer) continue;
-        const c = this.tuftColorByPlant[dom];
+        let c = this.tuftColorByPlant[dom];
         if (!c) continue;
+        if (this.snow > 0) c = mixRgb(c, [0.93, 0.95, 0.98], Math.min(0.85, this.snow));
         const mow = this.habitat.mow[node];
         const disturbed = this.habitat.disturbance[node];
         if (disturbed > 0.85) continue; // gravel, mud, foundations stay bare
@@ -328,6 +359,7 @@ export class HerbRenderer {
     for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
       for (const k of this.buckets.get(this.bucketKey(bx + dx, bz + dz)) ?? []) {
         if (!this.look[h.plant[k]][h.cohort[k]].visual) continue;
+        if (this.visibility?.(k).hidden) continue;
         const d = Math.hypot(h.x[k] - x, h.z[k] - z);
         if (d < bestD) { bestD = d; best = k; }
       }
@@ -337,6 +369,24 @@ export class HerbRenderer {
 
   plantIndexOf(index: number): number {
     return this.herbs.plant[index];
+  }
+
+  /** Placement record for one individual (position, scale, cohort, habitat node). */
+  individual(index: number) {
+    const h = this.herbs;
+    return { x: h.x[index], y: h.y[index], z: h.z[index], scale: h.scale[index], cohort: h.cohort[index], node: h.node[index], plant: h.plant[index] };
+  }
+
+  /** Force the near field to refill (after a harvest changes what's visible). */
+  invalidate() {
+    this.lastCentre = null;
+  }
+
+  /** Top of a plant above its base today (m), for VR reach checks. */
+  heightOf(index: number): number {
+    const a = this.appearanceOf(index);
+    const p = PLANTS[this.herbs.plant[index]];
+    return (a.visual === "basal" ? 0.12 : p.height * a.growth) * this.herbs.scale[index] * this.cut[index];
   }
 
   appearanceOf(index: number): Appearance {

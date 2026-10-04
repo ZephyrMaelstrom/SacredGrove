@@ -15,7 +15,8 @@
     "report:habitat": "tsx scripts/habitat-report.ts"
   },
   "dependencies": {
-    "@babylonjs/core": "^8.56.2"
+    "@babylonjs/core": "^8.56.2",
+    "@babylonjs/gui": "^8.56.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

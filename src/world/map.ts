@@ -235,3 +235,29 @@ export function heightAt(x: number, z: number): number {
   y += 0.8 * smooth(355, 400, z);
   return y;
 }
+
+/**
+ * Where a ray meets the ground, by marching along it against heightAt():
+ * far cheaper than picking the terrain mesh every frame (it matters on Quest).
+ */
+export function groundHit(
+  ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDist: number,
+): { x: number; y: number; z: number; distance: number } | null {
+  if (dy > 0.2) return null; // looking up at the sky
+  let prevT = 0, prevAbove = oy - heightAt(ox, oz);
+  if (prevAbove <= 0) return { x: ox, y: heightAt(ox, oz), z: oz, distance: 0 };
+  for (let t = 0.25; t <= maxDist; t += 0.25) {
+    const x = ox + dx * t, y = oy + dy * t, z = oz + dz * t;
+    const above = y - heightAt(x, z);
+    if (above <= 0) {
+      // Refine between the last two samples.
+      const f = prevAbove / (prevAbove - above);
+      const tt = prevT + (t - prevT) * f;
+      const hx = ox + dx * tt, hz = oz + dz * tt;
+      return { x: hx, y: heightAt(hx, hz), z: hz, distance: tt };
+    }
+    prevT = t;
+    prevAbove = above;
+  }
+  return null;
+}

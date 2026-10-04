@@ -14,6 +14,7 @@
  * flower, and leave a dead stalk standing through the following winter.
  */
 import type { Plant } from "../data/plants";
+import { NEUTRAL_SEASON, shiftFor, type SeasonAdjust } from "../time/season";
 
 export type Stage = "absent" | "winter" | "emerging" | "vegetative" | "flowering" | "fruiting" | "senescent";
 
@@ -38,6 +39,10 @@ export interface Appearance {
   growth: number;
   /** Woody plants: is the plant in leaf? (Spicebush flowers on bare twigs.) */
   leafy: boolean;
+  /** A late frost killed this year's blossoms: no fruit. */
+  fruitFailed?: boolean;
+  /** Blackened by frost (the few days after a killing frost). */
+  frostKilled?: boolean;
 }
 
 export const DAYS_IN_YEAR = 365;
@@ -77,16 +82,50 @@ const winterLook = (p: Plant, cohort: Cohort): Appearance => {
   }
 };
 
-export function appearance(p: Plant, doy: number, cohort: Cohort = 1): Appearance {
+const wrapDoy = (d: number) => ((((d - 1) % DAYS_IN_YEAR) + DAYS_IN_YEAR) % DAYS_IN_YEAR) + 1;
+
+/** This year's calendar for a plant: spring shifts, frost kill, failed fruit. */
+export function adjustedPhenology(p: Plant, s: SeasonAdjust) {
   const ph = p.phenology;
   const woody = p.form === "tree" || p.form === "shrub";
+  const shift = (d: number) => (d === NEVER ? d : wrapDoy(d + shiftFor(s, d)));
+  const greenUp = shift(ph.greenUp), flowerStart = shift(ph.flowerStart), flowerEnd = shift(ph.flowerEnd);
+  const fruitRipe = shift(ph.fruitRipe);
+
+  // Killing frost ends the season early for plants that can't take it.
+  let kill: number | null = null;
+  if (ph.dieback !== NEVER && ph.dieback > 182) {
+    if (woody) kill = s.hardFreeze !== null ? s.hardFreeze + 5 : null;
+    else if (p.cycle === "summerAnnual") kill = s.firstFrost;
+    else if ((p.cycle === "perennial" || p.cycle === "biennial") && ph.winterForm !== "evergreen") kill = s.hardFreeze;
+    if (kill !== null && (kill >= ph.dieback || kill < 182)) kill = null;
+  }
+
+  // A hard frost on open blossoms means no fruit this year.
+  const fruitFailed = woody && flowerStart < 182 &&
+    s.springFrosts.some((f) => inWindow(f, flowerStart, wrapDoy(flowerEnd + 10)));
+
+  return { greenUp, flowerStart, flowerEnd, fruitRipe, dieback: ph.dieback, kill, fruitFailed };
+}
+
+export function appearance(p: Plant, doy: number, cohort: Cohort = 1, s: SeasonAdjust = NEUTRAL_SEASON): Appearance {
+  const ph = adjustedPhenology(p, s);
+  const woody = p.form === "tree" || p.form === "shrub";
   const alwaysActive = ph.dieback === NEVER;
-  const active = alwaysActive || inWindow(doy, ph.greenUp, ph.dieback);
+  let active = alwaysActive || inWindow(doy, ph.greenUp, ph.dieback);
   const inBloom = inWindow(doy, ph.flowerStart, ph.flowerEnd);
+
+  // Frost-killed: a few days blackened, then the plant's winter form.
+  if (active && ph.kill !== null && inWindow(doy, ph.kill, ph.dieback)) {
+    if (!woody && doy - ph.kill < 4 && !(p.cycle === "biennial" && cohort === 0)) {
+      return { stage: "senescent", visual: "senescent", growth: 1, leafy: true, frostKilled: true };
+    }
+    active = false;
+  }
 
   if (!active) {
     // Woody plants that bloom before leafing out show their flowers on bare wood.
-    if (woody && inBloom) return { stage: "flowering", visual: "flowering", growth: 1, leafy: false };
+    if (woody && inBloom) return { stage: "flowering", visual: "flowering", growth: 1, leafy: false, fruitFailed: ph.fruitFailed };
     return winterLook(p, cohort);
   }
 
@@ -102,13 +141,16 @@ export function appearance(p: Plant, doy: number, cohort: Cohort = 1): Appearanc
     const growth = Math.min(1, 0.35 + t / 90);
     return { stage: t < EMERGE_DAYS ? "emerging" : "vegetative", visual: "basal", growth, leafy: true };
   }
-  if (inBloom) return { stage: "flowering", visual: "flowering", growth: 1, leafy: true };
+  if (inBloom) return { stage: "flowering", visual: "flowering", growth: 1, leafy: true, fruitFailed: ph.fruitFailed };
   if (!alwaysActive && season - t <= SENESCE_DAYS) {
     return { stage: "senescent", visual: woody ? "vegetative" : "senescent", growth: 1, leafy: true };
   }
   // Seed heads hold until dieback; evergreens drop them after a couple of months.
   const fruitDays = alwaysActive ? FRUIT_HOLD_DAYS : Infinity;
-  if (bloomInSeason && t > fEnd && t - fEnd <= fruitDays) return { stage: "fruiting", visual: "fruiting", growth: 1, leafy: true };
+  if (bloomInSeason && t > fEnd && t - fEnd <= fruitDays) {
+    if (ph.fruitFailed) return { stage: "vegetative", visual: "vegetative", growth: 1, leafy: true, fruitFailed: true };
+    return { stage: "fruiting", visual: "fruiting", growth: 1, leafy: true };
+  }
   if (t < EMERGE_DAYS) {
     return { stage: "emerging", visual: "vegetative", growth: 0.25 + 0.35 * (t / EMERGE_DAYS), leafy: true };
   }

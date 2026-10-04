@@ -64,6 +64,8 @@ export interface Terrain {
   setVegetationTint(tint: Float32Array, amount: number): void;
   /** Paint property nodes with a debug colour (null = natural ground). */
   setOverlay(colorOf: ((node: number) => RGB | null) | null): void;
+  /** 0–1 snow cover over everything (applied on top of the vegetation tint). */
+  setSnow(cover: number): void;
 }
 
 export function createTerrain(scene: Scene): Terrain {
@@ -152,8 +154,29 @@ export function createTerrain(scene: Scene): Terrain {
   mesh.material = mat;
 
   let tinted = base;
+  let vegTint: number[] = base;
+  let snow = 0;
+  const applySnow = () => {
+    if (snow <= 0) { tinted = vegTint; return; }
+    tinted = vegTint.slice();
+    for (let k = 0; k < nx * nz; k++) {
+      // Patchy at first: snow fills low spots and leaves ridges and tall stubble showing.
+      const x = x0 + (k % nx) * step, z = z0 + Math.floor(k / nx) * step;
+      const patch = Math.min(1, Math.max(0, snow * 1.6 - 0.6 * noise2(x * 0.12, z * 0.12)));
+      const w = 0.9 * patch;
+      tinted[k * 4] = tinted[k * 4] * (1 - w) + 0.93 * w;
+      tinted[k * 4 + 1] = tinted[k * 4 + 1] * (1 - w) + 0.95 * w;
+      tinted[k * 4 + 2] = tinted[k * 4 + 2] * (1 - w) + 0.98 * w;
+    }
+  };
   return {
     mesh,
+    setSnow(cover: number) {
+      if (Math.abs(cover - snow) < 0.01) return;
+      snow = cover;
+      applySnow();
+      mesh.setVerticesData("color", tinted, true);
+    },
     setVegetationTint(tint: Float32Array, amount: number) {
       // Expand node tint onto terrain vertices, blur it so single nodes don't speckle.
       const vtx = new Array(nx * nz * 3).fill(-1);
@@ -164,11 +187,12 @@ export function createTerrain(scene: Scene): Terrain {
         vtx[k] = tint[n * 3]; vtx[k + 1] = tint[n * 3 + 1]; vtx[k + 2] = tint[n * 3 + 2];
       }
       const soft = blur(vtx, 3, (k) => vtx[k * 3] >= 0);
-      tinted = base.slice();
+      vegTint = base.slice();
       for (let k = 0; k < nx * nz; k++) {
         if (soft[k * 3] < 0) continue;
-        for (let ch = 0; ch < 3; ch++) tinted[k * 4 + ch] = base[k * 4 + ch] * (1 - amount) + soft[k * 3 + ch] * 0.85 * amount;
+        for (let ch = 0; ch < 3; ch++) vegTint[k * 4 + ch] = base[k * 4 + ch] * (1 - amount) + soft[k * 3 + ch] * 0.85 * amount;
       }
+      applySnow();
       mesh.setVerticesData("color", tinted, true);
     },
     setOverlay(colorOf) {

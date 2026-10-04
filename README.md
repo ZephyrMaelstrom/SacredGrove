@@ -12,26 +12,57 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | M1 · The land | Map 1 terrain, gray-box homestead, early-March lighting | Done |
 | M2 · Habitat grid | Light, moisture (real water-flow routing), disturbance, fertility, mowing, plow and fire history on a 2 m grid, computed in a Web Worker | Done |
 | M3 · Vegetation | 94 species placed by habitat fit, phenology for every plant, procedural meshes, streaming renderer, seasonal trees | Done |
-| M4 · Time | Day clock, weather, sleep-to-advance | Next |
+| M4 · Time | Day clock, real sun position, Southern Illinois weather and snowpack, years that differ (early/late springs, frosts), sleep and save | Done |
+| M5 · Forage | Hands/knife/trowel, VR hands and controllers, potency, harvest pressure and multi-year recovery, Field Journal, smell and taste, contact hazards | Done |
+| M6 · Homestead | Barn interior: drying loft, root cellar, tack room; spoilage | Next |
 
 ## Controls
 
-**Headset:** open the Play link in the Quest browser and press the VR button. Point and push the thumbstick (or pinch) to teleport.
+**Headset** (open the Play link in the Quest browser, press the VR button)
+
+| Do this | To |
+| --- | --- |
+| Thumbstick forward (or hand teleport) | Walk |
+| Look steadily at a plant | Identify it (its name appears above your left hand) |
+| Reach down to a plant, squeeze grip / pinch, hold | Harvest with the tool in your right hand |
+| Right B or thumbstick click | Next tool (hands → knife → trowel) |
+| Left Y | Gloves on/off |
+| Left X or Menu | Satchel panel: basket (smell / taste / toss), tools, journal |
+| Right A, or pinch at the door / barn | Sleep / unload the basket |
 
 **Desktop**
 
 | Key | Does |
 | --- | --- |
-| Click, mouse | Look |
-| WASD, Shift | Walk, hurry |
-| Aim at a plant | HUD names it, its stage today, how well it fits that spot, and what limits it |
-| Z | Cycle habitat overlays: zones, light, moisture, wetness, disturbance, fertility, garden-escape reach, bird perches, mowing, plow history |
-| X | Paint where the plant you're looking at can grow |
-| `[` `]` / `,` `.` | Back / forward one week / one day |
-| V | Vegetation on/off (performance comparison) |
-| F, then Q/E | Fly mode, down/up |
+| Click, mouse · WASD · Shift | Look · walk · hurry |
+| Look at a plant | Steady look identifies it; HUD shows its stage and what your tool would take |
+| Hold left mouse | Harvest (within 3 m) |
+| 1 / 2 / 3 · G | Hands / knife / trowel · gloves |
+| E | At the front door: sleep (saves). At the barn doors: unload your basket |
+| Tab or J | Satchel: basket, Field Journal, barn, status |
+| `` ` `` | Dev view: real names, habitat values, limiting factor, frame budget |
+| Z · X | Habitat overlays · where the plant you're looking at can grow |
+| `[` `]` · `,` `.` · `-` `=` | ±1 week · ±1 day · ±1 hour |
+| T · V · F (Q/E) | Time-lapse (a day per second) · vegetation on/off · fly |
 
-**URL options:** `?doy=200` start on a day of the year · `?quality=low|medium|high` · `?overlay=moisture` · `?fly`
+**URL options:** `?new` (fresh game) · `?doy=200&hour=14` · `?timelapse` · `?dev` · `?quality=low|medium|high` · `?overlay=moisture` · `?fly`
+
+## Time and weather (M4)
+
+- **Clock:** a 6 AM–midnight day lasts about 14 real minutes. The date turns at midnight. Stay up past 2 AM and you pass out and wake on the porch. The front door is your bed; sleeping saves the game (browser storage).
+- **Sun:** real solar position for Mount Vernon (38.3° N) with daylight saving time, so a June sunrise is 5:35 AM in the northeast and a December noon sun is 28° high.
+- **Weather** (`src/time/climate.ts`): generated per year from approximate Mount Vernon climate normals. Temperatures follow the seasonal normal plus persistent warm and cold spells; wet days cluster; storms come in summer afternoons; it snows only when the day stays near freezing (about 13 inches a year); fog follows still, damp nights. Snow piles up and melts, and covers the ground.
+- **Years differ** (`src/time/season.ts`): a warm spring brings green-up and bloom up to 12 days early, a cold one late. The first frost kills summer annuals overnight, a hard freeze ends the season for perennials and strips the trees, and a late frost on open blossoms means no persimmons, cherries or mulberries that year.
+- Tests check 60 simulated years against the normals: monthly highs and lows, wet days, precipitation, frost dates and snowfall.
+
+## Foraging (M5)
+
+- **Tools:** hands pick leaves, flowers, fruit and seed; the knife cuts bark, sap and whole stems (and makes cleaner cuts of anything); the trowel digs roots, rhizomes and bulbs. Each part is only there in season: no goldenrod flowers in March, rose hips into winter, maple sap in February.
+- **Potency** (0–100%): how well the plant's stage suits the part (mid-bloom flowers, fall roots, first-year biennial roots), whether you're inside its harvest months, how well it grows there, and conditions (rain, dew and fog mark down delicate herbs; sunny afternoons favor aromatic oils).
+- **The land remembers** (`src/game/harvestState.ts`): picked leaves regrow in two weeks; stripped flowers and fruit are gone for the season; cut plants return next year; dug plants take 1–6 years (slow, conservative perennials longest). Take more than a third of a patch and it comes back thinner for 1–5 years.
+- **Field Journal:** a plant gets a page when you first see it, a name when you examine it or harvest it, and its smell and taste notes only when you test a sample. Tasting is risky: toxic plants make you sick for hours, deadly ones knock you out (you wake at home, basket lost) and the journal records it.
+- **Hazards:** poison ivy (a three-day rash), nettle stings, wild parsnip sap in sunlight (blisters), thorns. Gloves prevent all of it.
+- **Basket:** 4 kg. Unload it at the barn for now; the barn interior with drying, the root cellar and spoilage is M6.
 
 ## How the world grows
 
@@ -50,7 +81,7 @@ npm run census                      # plant share per zone, like a field survey
 npm run census -- --zone remnant    # one zone in full
 npm run census -- --plant "Rattlesnake"   # where a plant grows, and why not elsewhere
 npm run report:habitat              # mean habitat values per zone
-npm test                            # ecology, phenology and geometry tests
+npm test                            # ecology, phenology, geometry, climate and foraging tests
 ```
 
 The tests encode field patterns the world must keep: the yard is a lawn, jimsonweed stays in the barnyard, garlic mustard stays in the shade, conservative prairie plants stay on never-plowed ground, fencerow trees are bird-planted rather than squirrel-planted, goldenrod takes over the unmowed field, and more.
@@ -92,7 +123,11 @@ data/Rootwake_Species_Database.xlsx   the species workbook (source of truth)
 scripts/build-data.mjs                workbook → src/data/plants.gen.json (validated)
 scripts/census.ts                     ecology census and plant diagnostics
 src/
-  main.ts                 boot: worker, world, vegetation, XR, HUD, debug keys
+  main.ts                 boot: worker, world, vegetation, game session, XR, HUD, debug keys
+  time/                   clock, climate + weather + snowpack, season effects, sun position
+  game/                   save state, harvest rules, harvest pressure, basket, journal, session
+  interact/               desktop and VR foraging controls
+  ui/                     satchel panel, toasts, fade
   data/plants.ts          typed plant database
   sim/                    pure TypeScript, runs in the worker and in tests
     grid.ts               2 m habitat grid

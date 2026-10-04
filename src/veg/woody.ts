@@ -6,6 +6,7 @@
 import { Color3, InstancedMesh, Mesh, Scene, ShadowGenerator, StandardMaterial } from "@babylonjs/core";
 import { PLANTS, PLANT_INDEX, type Plant } from "../data/plants";
 import { appearance } from "../sim/phenology";
+import { NEUTRAL_SEASON, type SeasonAdjust } from "../time/season";
 import type { InstanceSet } from "../sim/placement";
 import { hashString } from "../sim/random";
 import { crownMesh, woodMesh } from "./treeMeshes";
@@ -38,6 +39,7 @@ interface Proto {
 interface Placed {
   plant: number;
   x: number;
+  y: number;
   z: number;
   scale: number;
 }
@@ -107,7 +109,7 @@ export class WoodyRenderer {
       c.freezeWorldMatrix();
     }
     if (castShadow) this.shadows?.addShadowCaster(inst, false);
-    this.placed.push({ plant: pi, x, z, scale });
+    this.placed.push({ plant: pi, x, y, z, scale });
     return inst;
   }
 
@@ -124,10 +126,10 @@ export class WoodyRenderer {
   }
 
   /** Leaf-out, bloom, fall colour and bare winter crowns for every species. */
-  setDay(doy: number) {
+  setDay(doy: number, season: SeasonAdjust = NEUTRAL_SEASON) {
     for (const p of this.protos.values()) {
       if (!p.crown) continue;
-      const a = appearance(p.plant, doy, 1);
+      const a = appearance(p.plant, doy, 1, season);
       const leaf = hexToRgb(p.plant.colors.leaf);
       const flower = hexToRgb(p.plant.colors.flower);
       const m = p.crownMat;
@@ -150,14 +152,20 @@ export class WoodyRenderer {
     }
   }
 
-  /** Nearest woody plant to a ground point (for the look-at readout). */
-  nearest(x: number, z: number, maxDist: number): { plant: Plant; distance: number } | null {
-    let best: Placed | null = null, bestD = maxDist;
-    for (const w of this.placed) {
-      const d = Math.hypot(w.x - x, w.z - z) - 0.3 * w.scale * PLANTS[w.plant].height * 0.1;
-      if (d < bestD) { bestD = d; best = w; }
+  /** Nearest woody plant to a ground point (look-at readout, harvesting). */
+  nearest(x: number, z: number, maxDist: number): { plant: Plant; distance: number; index: number } | null {
+    let best = -1, bestD = maxDist;
+    for (let i = 0; i < this.placed.length; i++) {
+      const w = this.placed[i];
+      // Measure to the edge of the trunk / stem cluster, not its centre.
+      const d = Math.hypot(w.x - x, w.z - z) - 0.25 * w.scale;
+      if (d < bestD) { bestD = d; best = i; }
     }
-    return best ? { plant: PLANTS[best.plant], distance: bestD } : null;
+    return best < 0 ? null : { plant: PLANTS[this.placed[best].plant], distance: bestD, index: best };
+  }
+
+  individual(index: number) {
+    return this.placed[index];
   }
 
   get count() {
