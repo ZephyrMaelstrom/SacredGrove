@@ -318,9 +318,10 @@ export function stepGarden(g: GardenState, day: number, year: number, doy: numbe
     }
 
     // ---- frost
-    const tender = p.cycle === "summerAnnual";
+    // Warm-season annuals are tender; early-sprouting (cool-season) annuals like chamomile are hardy.
+    const tender = p.cycle === "summerAnnual" && p.phenology.greenUp > 85;
     // Cool-season seedlings shrug off light freezes; a hard one still kills them.
-    const seedlingKill = p.cycle === "winterAnnual" ? -99 : p.phenology.greenUp <= 85 ? 22 : 28;
+    const seedlingKill = p.cycle === "winterAnnual" ? -99 : p.phenology.greenUp <= 85 ? 18 : 28;
     if ((tender && w.lowF <= 31) || (pl.size < 0.12 && w.lowF <= seedlingKill)) {
       pl.dead = "killed by frost";
       pl.deadDay = day;

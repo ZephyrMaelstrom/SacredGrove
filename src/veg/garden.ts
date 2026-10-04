@@ -107,7 +107,14 @@ export class GardenRenderer {
       if ((shrink < 1 || pl.strippedYear === year) && (visual === "flowering" || visual === "fruiting")) visual = "vegetative";
       // Well-fed garden plants run a little larger than wild ones.
       const sc = look.growth * shrink * 1.25;
-      this.proto(p, visual).mats.push(...matrix(sc, sc, rot, spot.x, spot.y, spot.z));
+      // A sown spot comes up as a little stand of plants; a division as a clump of stems.
+      const n = pl.from === "seed" ? Math.min(5, 2 + Math.floor(pl.seeds / 4)) : 3;
+      const proto = this.proto(p, visual);
+      for (let k = 0; k < n; k++) {
+        const a = rot + (k * Math.PI * 2) / n, r = k === 0 ? 0 : 0.1 + 0.03 * (k % 2);
+        const ks = k === 0 ? 1 : 0.8 + 0.1 * ((spot.index + k) % 3);
+        proto.mats.push(...matrix(sc * ks, sc * ks, rot + k * 1.7, spot.x + Math.cos(a) * r, spot.y, spot.z + Math.sin(a) * r));
+      }
     }
 
     // Weeds: a few more each week until you pull them.

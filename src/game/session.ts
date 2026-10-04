@@ -221,7 +221,7 @@ export class Session {
       const d = Math.hypot(spot.x - x, spot.z - z);
       if (d >= bestD) continue;
       const pl = this.state.garden.slots[spot.index];
-      if (!pl) continue;
+      if (!pl || (pl.dead && !pl.dead.startsWith("went to seed"))) continue;
       const plant = plantByLatin(pl.latin);
       if (!plantingLook(pl, plant, c.doy, c.year, this.season, absDay(c))) continue;
       bestD = d;
