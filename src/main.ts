@@ -25,6 +25,7 @@ import { createColliders } from "./world/colliders";
 import { layout } from "./world/layout";
 import { GardenRenderer } from "./veg/garden";
 import { Ambience } from "./audio/ambience";
+import { setupLocomotion } from "./xr/locomotion";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const loading = document.getElementById("loading")!;
@@ -128,7 +129,10 @@ async function boot() {
     toggleSatchel: () => satchel.toggle(),
     satchelOpen: () => satchel.open,
   });
-  const vr = xr ? setupVrForaging(scene, xr, session, herbs, toasts) : null;
+  let satchelOpenVr = () => false;
+  const loco = xr ? setupLocomotion(scene, xr, { blocked: () => satchelOpenVr() }) : undefined;
+  const vr = xr ? setupVrForaging(scene, xr, session, herbs, toasts, loco) : null;
+  if (vr) satchelOpenVr = vr.satchelOpen;
   session.openJournal = () => (vr && scene.activeCamera === xr!.baseExperience.camera ? vr.showJournal() : satchel.show("journal"));
   const garden = new GardenRenderer(scene);
   const refreshWorld = () => {

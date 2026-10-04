@@ -26,10 +26,12 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 
 | Do this | To |
 | --- | --- |
-| Thumbstick forward (or hand teleport) | Walk |
+| Left stick (click to hurry) | Walk smoothly: where you look, or where the left controller points |
+| Right stick | Turn smoothly (snap turning, speeds and a comfort vignette are in the satchel's Tools tab) |
+| Hand tracking only | Teleport arc (it switches off whenever controllers are in use) |
 | Look steadily at a plant | Identify it (its name appears above your left hand) |
 | Reach down to a plant, squeeze grip / pinch, hold | Harvest with the tool in your right hand |
-| Right B or thumbstick click | Next tool (hands → knife → trowel → seed envelope) |
+| Right B | Next tool (hands → knife → trowel → seed envelope) |
 | Left Y | Gloves on/off |
 | Left X or Menu | Satchel panel: basket (smell / taste / toss), tools, journal |
 | Right A, or pinch at a station | Use it: bed, bench, drying racks, vent, jar shelf, seed catalog, cellar, stand. Its panel floats in front of you; point and pull the trigger, or poke, to press |

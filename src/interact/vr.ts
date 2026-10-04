@@ -1,6 +1,7 @@
 /**
  * VR foraging controls (Quest, hands or controllers).
  *
+ *   Left stick walks, right stick turns (see xr/locomotion.ts)
  *   Reach down to a plant and squeeze the grip (controllers) or pinch
  *   (hands) and hold          → harvest with the tool in your right hand
  *   Look steadily at a plant  → identify it
@@ -24,6 +25,8 @@ import {
 import { AdvancedDynamicTexture, Control, Rectangle, TextBlock } from "@babylonjs/gui";
 import type { Session } from "../game/session";
 import { VrPanel } from "./vrPanel";
+import type { setupLocomotion } from "../xr/locomotion";
+import { cycle, MOVE_SPEEDS, SNAP_ANGLES, TURN_SPEEDS } from "../xr/comfort";
 import { layout } from "../world/layout";
 import { roomAt } from "../world/walk";
 import { isPrep, isStock } from "../game/items";
@@ -87,7 +90,7 @@ function toolMeshes(scene: Scene) {
   return { knife: make("knifeTool", [kHandle, kBlade]), trowel: make("trowelTool", [tHandle, tScoop]), envelope: make("envelopeTool", [env]) };
 }
 
-export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, session: Session, herbs: HerbRenderer, toasts: Toasts) {
+export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, session: Session, herbs: HerbRenderer, toasts: Toasts, loco?: Loco) {
   const hands: Record<Side, HandState> = {
     left: { side: "left", pressed: false, wasPressed: false, progress: 0 },
     right: { side: "right", pressed: false, wasPressed: false, progress: 0 },
@@ -106,7 +109,7 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
       const btn = (id: string, fn: () => void) => mc.getComponent(id)?.onButtonStateChangedObservable.add((comp) => { if (comp.changes.pressed?.current) fn(); });
       if (side === "right") {
         btn("b-button", () => session.cycleTool(1));
-        btn("xr-standard-thumbstick", () => session.cycleTool(1));
+        // (The right stick turns you now; tools cycle on B.)
         btn("a-button", () => tryInteract(null));
       } else {
         btn("x-button", () => satchel.toggle());
@@ -201,7 +204,7 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
   wrist.setEnabled(false);
 
   // ---------------------------------------------------------- panels
-  const satchel = createVrSatchel(scene, session);
+  const satchel = createVrSatchel(scene, session, loco);
   const stationPanel = new VrPanel(scene, "vrStation", (act) => session.stationAct(act), 1.05);
   const syncStation = () => {
     const inXR = xr.baseExperience.state === WebXRState.IN_XR;
@@ -303,14 +306,15 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
     wristText.text = lines.join("\n");
   });
 
-  return { hands, showJournal: () => satchel.showJournal() };
+  return { hands, showJournal: () => satchel.showJournal(), satchelOpen: () => satchel.open };
 }
 
 // ------------------------------------------------------------ VR satchel
 
 type SatchelTab = "basket" | "tools" | "journal";
+type Loco = ReturnType<typeof setupLocomotion>;
 
-function satchelView(session: Session, tab: SatchelTab): PanelView {
+function satchelView(session: Session, tab: SatchelTab, loco?: Loco): PanelView {
   const s = session.state;
   const tabs = { rows: [], buttons: (["basket", "tools", "journal"] as SatchelTab[]).map((t) => ({ label: t[0].toUpperCase() + t.slice(1), act: `tab:${t}`, on: t === tab })) };
   if (tab === "basket") {
@@ -340,7 +344,19 @@ function satchelView(session: Session, tab: SatchelTab): PanelView {
           { text: "Tool", buttons: (["hand", "knife", "trowel", "envelope"] as Tool[]).map((t) => ({ label: TOOL_NAMES[t], act: `tool:${t}`, on: s.tool === t })) },
           { text: s.gloves ? "Wearing gloves" : "Bare-handed", buttons: [{ label: s.gloves ? "Gloves off" : "Gloves on", act: "gloves" }] },
         ],
-      }],
+      }, ...(loco ? [{
+        title: "Movement",
+        note: "Left stick walks (click it to hurry), right stick turns.",
+        rows: [
+          { text: `Turning: ${loco.comfort.turn}`, buttons: [{ label: "Smooth", act: "comfort:turn:smooth", on: loco.comfort.turn === "smooth" }, { label: "Snap", act: "comfort:turn:snap", on: loco.comfort.turn === "snap" }] },
+          loco.comfort.turn === "smooth"
+            ? { text: `Turn speed: ${loco.comfort.turnSpeed}°/s`, buttons: [{ label: "Change", act: "comfort:turnSpeed" }] }
+            : { text: `Snap angle: ${loco.comfort.snapAngle}°`, buttons: [{ label: "Change", act: "comfort:snapAngle" }] },
+          { text: `Walking speed: ${loco.comfort.moveSpeed} m/s`, buttons: [{ label: "Change", act: "comfort:moveSpeed" }] },
+          { text: `Walk toward: ${loco.comfort.direction === "head" ? "where you look" : "where the left controller points"}`, buttons: [{ label: "Head", act: "comfort:direction:head", on: loco.comfort.direction === "head" }, { label: "Hand", act: "comfort:direction:hand", on: loco.comfort.direction === "hand" }] },
+          { text: `Comfort vignette: ${loco.comfort.vignette ? "on" : "off"}`, buttons: [{ label: loco.comfort.vignette ? "Turn off" : "Turn on", act: "comfort:vignette" }] },
+        ],
+      }] : [])],
     };
   }
   const known = Object.values(s.journal).filter((e) => e.identified);
@@ -359,7 +375,7 @@ function satchelView(session: Session, tab: SatchelTab): PanelView {
   };
 }
 
-function createVrSatchel(scene: Scene, session: Session) {
+function createVrSatchel(scene: Scene, session: Session, loco?: Loco) {
   let tab: SatchelTab = "basket";
   const panel = new VrPanel(scene, "vrSatchel", (act) => {
     const [verb, a] = act.split(":");
@@ -370,15 +386,25 @@ function createVrSatchel(scene: Scene, session: Session) {
     if (verb === "toss") session.discard(a);
     if (verb === "tool") session.setTool(a as Tool);
     if (verb === "gloves") session.toggleGloves();
+    if (verb === "comfort" && loco) {
+      const [, key, val] = act.split(":");
+      const c = loco.comfort;
+      if (key === "turn") loco.set("turn", val as "smooth" | "snap");
+      if (key === "direction") loco.set("direction", val as "head" | "hand");
+      if (key === "turnSpeed") loco.set("turnSpeed", cycle(TURN_SPEEDS, c.turnSpeed));
+      if (key === "snapAngle") loco.set("snapAngle", cycle(SNAP_ANGLES, c.snapAngle));
+      if (key === "moveSpeed") loco.set("moveSpeed", cycle(MOVE_SPEEDS, c.moveSpeed));
+      if (key === "vignette") loco.set("vignette", !c.vignette);
+    }
     render();
   }, 0.95);
-  const render = () => panel.show(api.open ? satchelView(session, tab) : null);
+  const render = () => panel.show(api.open ? satchelView(session, tab, loco) : null);
   const api = {
     get open() { return panel.open; },
     toggle() {
       const opening = !panel.open;
       session.paused = opening;
-      if (opening) panel.show(satchelView(session, tab));
+      if (opening) panel.show(satchelView(session, tab, loco));
       else panel.show(null);
     },
     showJournal() {
