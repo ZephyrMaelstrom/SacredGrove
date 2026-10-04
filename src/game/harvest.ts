@@ -10,9 +10,9 @@ import type { SeasonAdjust } from "../time/season";
 import { monthOf, isPrecipitating, isFoggy, type DayWeather } from "../time/climate";
 import { rng, mixSeed } from "../sim/random";
 
-export type Tool = "hand" | "knife" | "trowel";
-export const TOOLS: Tool[] = ["hand", "knife", "trowel"];
-export const TOOL_NAMES: Record<Tool, string> = { hand: "Hands", knife: "Knife", trowel: "Trowel" };
+export type Tool = "hand" | "knife" | "trowel" | "envelope";
+export const TOOLS: Tool[] = ["hand", "knife", "trowel", "envelope"];
+export const TOOL_NAMES: Record<Tool, string> = { hand: "Hands", knife: "Knife", trowel: "Trowel", envelope: "Seed envelope" };
 
 const DIG_PARTS = new Set(["Root", "Rhizome", "Bulb", "Tuber"]);
 const CUT_PARTS = new Set(["Bark", "Twig", "Sap", "Resin"]);
@@ -21,6 +21,7 @@ const PRIORITY: Record<Tool, string[]> = {
   hand: ["Flower", "Fruit", "Fruiting body", "Seed", "Leaf", "Shoot", "Pad", "Exudate", "Whole"],
   knife: ["Sap", "Resin", "Bark", "Twig", "Whole", "Flower", "Fruit", "Fruiting body", "Seed", "Leaf", "Shoot", "Pad"],
   trowel: ["Root", "Rhizome", "Bulb", "Tuber"],
+  envelope: [],
 };
 
 const isWoodyPlant = (p: Plant) => p.form === "tree" || p.form === "shrub";

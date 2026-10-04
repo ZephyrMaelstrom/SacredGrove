@@ -7,13 +7,14 @@ import { PLANTS } from "../data/plants";
 import type { Session } from "../game/session";
 import { absDay, formatTime } from "../time/clock";
 import { formatDoy } from "../sim/phenology";
-import { isPrep, METHOD_NAMES, type Item } from "../game/items";
+import { isPrep, isStock, METHOD_NAMES, type Item } from "../game/items";
 import { herbCondition } from "../game/storage";
-import { money, prepSummary } from "../game/homestead";
+import { itemName, money, prepSummary } from "../game/homestead";
 import { effectWord } from "../game/stations";
 import { strengthWord } from "../game/apothecary";
+import { GOALS, nextGoal } from "../game/goals";
 
-type Tab = "basket" | "journal" | "recipes" | "ledger";
+type Tab = "notes" | "basket" | "journal" | "recipes" | "ledger";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FORM_WORDS: Record<string, string> = {
   rosette: "rosette", mat: "low creeper", forb: "forb", tallForb: "tall forb", grass: "grass", sedge: "sedge",
@@ -24,7 +25,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 export class Satchel {
   private el: HTMLElement;
-  private tab: Tab = "basket";
+  private tab: Tab = "notes";
   open = false;
 
   constructor(private session: Session) {
@@ -65,6 +66,10 @@ export class Satchel {
       const btns = actions ? `<button data-act="taste" data-id="${esc(l.id)}" class="warn">Taste</button><button data-act="toss" data-id="${esc(l.id)}">Pour out</button>` : "";
       return `<tr><td><b>${esc(l.name)}</b><br><span class="dim">${esc(prepSummary(l))} · ${esc(l.description)}</span></td><td>${l.volumeMl} ml</td><td></td><td class="acts">${btns}</td></tr>`;
     }
+    if (isStock(l)) {
+      const btns = actions ? `<button data-act="toss" data-id="${esc(l.id)}">Toss</button>` : "";
+      return `<tr><td><b>${esc(itemName(s, l))}</b><br><span class="dim">${l.form === "seed" ? `${l.count} seeds · plant in a garden bed` : "living division · plant it soon"}${l.chill ? ` · ${l.chill} cold days banked` : ""}</span></td><td></td><td>${potencyBar(l.viability)}</td><td class="acts">${btns}</td></tr>`;
+    }
     const plant = PLANTS.find((p) => p.latin === l.latin);
     const known = !!(plant && s.journal[l.latin]?.identified);
     const age = absDay(s.clock) - l.harvestedDay;
@@ -78,7 +83,7 @@ export class Satchel {
 
   render() {
     const s = this.session.state;
-    const tabs = (["basket", "journal", "recipes", "ledger"] as Tab[])
+    const tabs = (["notes", "basket", "journal", "recipes", "ledger"] as Tab[])
       .map((t) => `<button data-tab="${t}" class="${t === this.tab ? "on" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("");
     let body = "";
     if (this.tab === "basket") {
@@ -86,6 +91,13 @@ export class Satchel {
         ? `<p class="dim">Basket ${this.session.basketLine()} · Smell and taste a sample to fill in its journal page. Tasting unknown plants is dangerous.</p>
            <table>${s.basket.map((l) => this.lotRow(l, true)).join("")}</table>`
         : `<p class="dim">Your basket is empty. Hold the left mouse button on a plant to harvest it.</p>`;
+    } else if (this.tab === "notes") {
+      const next = nextGoal(s);
+      body = `<p class="dim">Field notes: a way through your first season. Each one finishes itself when you've done it.</p>` +
+        GOALS.map((g) => {
+          const done = s.goals.includes(g.id);
+          return `<div class="entry ${done ? "unknown" : ""}">${done ? "✓" : g === next ? "▸" : "○"} <b>${esc(g.title)}</b>${done ? "" : `<br><span class="dim">${esc(g.hint)}</span>`}</div>`;
+        }).join("");
     } else if (this.tab === "recipes") {
       body = this.recipes();
     } else if (this.tab === "ledger") {

@@ -52,7 +52,7 @@ export interface Floor {
   room: RoomId | null;
 }
 
-export type StationId = "bed" | "desk" | "bench" | "shelf" | "loft" | "vent" | "tack" | "gloves" | "cellar" | "stand";
+export type StationId = "bed" | "desk" | "bench" | "shelf" | "loft" | "vent" | "tack" | "gloves" | "cellar" | "stand" | "garden";
 
 export interface Station {
   id: StationId;
@@ -380,6 +380,17 @@ export function buildLayout(): Layout {
   // Bulkhead doors, swung open to either side.
   boxes.push(slab(swX0 - 0.08, swX0 - 0.02, swZ0 + 0.4, swZ0 + 2.6, curb, curb + 1.0, "darkWood"));
   boxes.push(slab(swX1 + 0.02, swX1 + 0.08, swZ0 + 0.4, swZ0 + 2.6, curb, curb + 1.0, "darkWood"));
+
+  // ============================================================ GARDEN
+  // The four raised beds east of the house (the beds themselves are drawn in buildings.ts).
+  const beds = SITE.raisedBeds;
+  const gx = (beds[0][0] + beds[beds.length - 1][0]) / 2, gz = beds[0][1] - 2.9;
+  stations.push({ id: "garden", label: "Kitchen garden — sow, water, weed", x: gx, y: heightAt(gx, gz), z: gz, radius: 3.6 });
+  // Rain barrel at the south end of the beds.
+  const rbx = beds[0][0] - 1.4, rbz = beds[0][1] - 1.6, gR = heightAt(rbx, rbz);
+  boxes.push(solid(rbx - 0.3, rbx + 0.3, rbz - 0.3, rbz + 0.3, gR, gR + 0.9, "darkWood", true));
+  boxes.push(slab(rbx - 0.32, rbx + 0.32, rbz - 0.32, rbz + 0.32, gR + 0.25, gR + 0.3, "iron"));
+  boxes.push(slab(rbx - 0.32, rbx + 0.32, rbz - 0.32, rbz + 0.32, gR + 0.65, gR + 0.7, "iron"));
 
   // ============================================================ FARM STAND
   const S = SITE.farmStand;

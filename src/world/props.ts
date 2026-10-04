@@ -16,6 +16,7 @@ const lerp = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1]
 
 function itemColor(i: Item): RGB {
   if (isPrep(i)) return i.spoiled ? [0.5, 0.5, 0.4] : i.flavor.astringent > 0.4 || (i.effects.dye ?? 0) > 0.3 ? [0.45, 0.12, 0.1] : [0.62, 0.38, 0.14];
+  if (i.kind === "stock") return i.form === "seed" ? [0.82, 0.74, 0.55] : [0.4, 0.3, 0.2];
   if (i.state === "moldy") return [0.78, 0.78, 0.74];
   if (i.state === "spoiled") return [0.28, 0.2, 0.13];
   const fresh: RGB = i.part === "Root" || i.part === "Rhizome" || i.part === "Tuber" || i.part === "Bark" ? [0.45, 0.32, 0.2]

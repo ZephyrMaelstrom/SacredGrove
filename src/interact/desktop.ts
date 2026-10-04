@@ -3,7 +3,7 @@
  *
  *   look at a plant      → its name once identified; a steady look identifies it
  *   hold left mouse      → harvest with the tool in hand (within arm's reach)
- *   1 / 2 / 3            → hands / knife / trowel
+ *   1 / 2 / 3 / 4        → hands / knife / trowel / seed envelope
  *   G                    → gloves on/off
  *   E                    → use what's in front of you (bed, bench, racks,
  *                          cellar shelves, seed catalog, stand…); E or Esc closes
@@ -55,6 +55,7 @@ export function setupDesktop(
       case "1": session.setTool("hand"); break;
       case "2": session.setTool("knife"); break;
       case "3": session.setTool("trowel"); break;
+      case "4": session.setTool("envelope"); break;
       case "g": case "G": session.toggleGloves(); break;
       case "e": case "E":
         if (session.panel) session.openPanel(null);

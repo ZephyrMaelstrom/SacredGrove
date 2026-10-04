@@ -57,6 +57,18 @@
       .entry { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.07); line-height: 1.5; }
       .entry ul { margin: 6px 0 0; padding-left: 18px; }
       .entry.unknown { opacity: .75; }
+      #start { position: fixed; inset: 0; display: none; place-items: center; z-index: 9;
+               background: radial-gradient(ellipse at center, rgba(30,44,26,.55), rgba(16,22,14,.88)); color: var(--ink); text-align: center; }
+      #start.open { display: grid; }
+      #start .card { max-width: 560px; padding: 28px 32px; }
+      #start h1 { font-family: Georgia, serif; font-weight: normal; font-size: 46px; letter-spacing: .06em; margin: 0 0 4px; }
+      #start .sub { color: var(--dim); margin: 0 0 22px; letter-spacing: .05em; }
+      #start p.blurb { line-height: 1.6; color: #dfe3d6; font-size: 14.5px; }
+      #start .btns { display: flex; gap: 10px; justify-content: center; margin: 22px 0 12px; flex-wrap: wrap; }
+      #start button { background: #4e7340; color: var(--ink); border: 0; border-radius: 8px; padding: 11px 22px; font: inherit; font-size: 15px; cursor: pointer; }
+      #start button.alt { background: #3a4a36; }
+      #start .fine { font-size: 12px; color: var(--dim); line-height: 1.6; }
+      #help.hidden { display: none; }
       @media (max-width: 700px) { #satchel { inset: 4vh 3vw; } #station { inset: 4vh 3vw; width: auto; } #help { display: none; } }
     </style>
   </head>
@@ -68,7 +80,14 @@
     <div id="toasts"></div>
     <div id="satchel"></div>
     <div id="station"></div>
-    <div id="help">Click to look · WASD walk · Shift hurry · look at a plant to identify it · hold left click to harvest<br />1 hands · 2 knife · 3 trowel · G gloves · E use (bed, bench, racks, cellar, stand…) · Esc close panel · Tab satchel &amp; journal<br />Debug: ` dev view · Z overlays · X where it grows · [ ] week · , . day · - = hour · T time-lapse · V plants · F fly</div>
+    <div id="start"><div class="card">
+      <h1>Rootwake</h1>
+      <p class="sub">Cedar Branch Road · Southern Illinois</p>
+      <p class="blurb">The old homestead is yours: a farmhouse, a barn with a hayloft and an apothecary bench, four raised beds, a stand by the road, and sixteen acres running from the ditch to the tree line. Ninety-some plants grow here, and nothing about them is written down until you learn it yourself.</p>
+      <div class="btns" id="startBtns"></div>
+      <p class="fine">Desktop: click to look, WASD to walk, E to use things, Tab for your satchel, H for help.<br />Quest: open this page in the headset browser and press the VR button.</p>
+    </div></div>
+    <div id="help" class="hidden">Click to look · WASD walk · Shift hurry · look at a plant to identify it · hold left click to harvest<br />1 hands · 2 knife · 3 trowel · 4 seed envelope · G gloves · E use (bed, bench, racks, cellar, stand…) · Esc close panel · Tab satchel &amp; journal · H help · M sound<br />Debug: ` dev view · Z overlays · X where it grows · [ ] week · , . day · - = hour · T time-lapse · V plants · F fly</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

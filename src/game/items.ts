@@ -6,6 +6,11 @@
  *              bad storage. Dried material can be ground in the mortar.
  *   PrepItem — something made at the apothecary bench (an infusion, a
  *              decoction): a liquid with effects, a flavor and a shelf life.
+ *   StockItem — living material for the garden: a seed packet (collected
+ *              with the seed envelope) or a division (a clump lifted with the
+ *              trowel). Viability falls with age and bad storage; native
+ *              perennial seed needs a cold, damp winter (or the root cellar)
+ *              before it will come up.
  */
 export type HerbState = "fresh" | "dried" | "moldy" | "spoiled";
 
@@ -69,11 +74,31 @@ export interface PrepItem {
   brewed?: { waterMl: number; minutes: number; covered: boolean };
 }
 
-export type Item = HerbLot | PrepItem;
+export interface StockItem {
+  kind: "stock";
+  id: string;
+  form: "seed" | "division";
+  latin: string;
+  /** Plant name (shown once the plant is identified). */
+  name: string;
+  /** Seeds in the packet, or 1 for a division. */
+  count: number;
+  /** 0–100: chance a seed comes up / a division takes. */
+  viability: number;
+  /** Days of cold, damp chilling banked so far (stratification). */
+  chill: number;
+  collectedDay: number;
+  updatedDay: number;
+  /** Written on (the old owner's packets): you know what's in it. */
+  labeled?: boolean;
+}
+
+export type Item = HerbLot | PrepItem | StockItem;
 
 export const isPrep = (i: Item): i is PrepItem => i.kind === "prep";
-export const isHerb = (i: Item): i is HerbLot => i.kind !== "prep";
-export const itemGrams = (i: Item) => (isPrep(i) ? i.volumeMl : i.grams);
+export const isStock = (i: Item): i is StockItem => i.kind === "stock";
+export const isHerb = (i: Item): i is HerbLot => i.kind === undefined || i.kind === "herb";
+export const itemGrams = (i: Item) => (isPrep(i) ? i.volumeMl : isStock(i) ? (i.form === "division" ? 150 : Math.max(1, Math.round(i.count / 200))) : i.grams);
 /** A cup is 250 ml; a cup that steamed down a little still counts. */
 export const CUP_ML = 250;
 export const FULL_CUP_ML = 225;

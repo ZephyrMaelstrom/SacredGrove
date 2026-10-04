@@ -18,7 +18,8 @@
  */
 import type { DayWeather } from "../time/climate";
 import { PLANTS } from "../data/plants";
-import { DRY_BELOW, isPrep, type HerbLot, type Item, type PrepItem } from "./items";
+import { stepStock } from "./garden";
+import { DRY_BELOW, isPrep, isStock, type HerbLot, type Item, type PrepItem } from "./items";
 
 export type PlaceId = "basket" | "loft" | "cellar" | "tack" | "shelf" | "stand";
 export const STORAGE_PLACES: Exclude<PlaceId, "basket">[] = ["loft", "cellar", "tack", "shelf", "stand"];
@@ -218,7 +219,8 @@ export function stepItems(items: Item[], place: PlaceId, weatherOn: (absDay: num
     while (it.updatedDay < today) {
       it.updatedDay++;
       const { w, doy } = weatherOn(it.updatedDay);
-      const n = stepHerb(it, place, conditions(place, w, { ventOpen: opts.ventOpen, crowding, doy }));
+      const c = conditions(place, w, { ventOpen: opts.ventOpen, crowding, doy });
+      const n = isStock(it) ? stepStock(it, place, conditions("cellar", w, { ventOpen: true, crowding: 0, doy }).tempF, (w.highF + w.lowF) / 2) : stepHerb(it, place, c);
       if (n) notes.push(n);
     }
   }

@@ -16,7 +16,9 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | M5 · Forage | Hands/knife/trowel, VR hands and controllers, potency, harvest pressure and multi-year recovery, Field Journal, smell and taste, contact hazards | Done |
 | M6 · Homestead | Enterable barn, hayloft, tack room, farmhouse and root cellar; drying with airflow and mold; cellar keeping; seed catalog; spoilage everywhere | Done |
 | M7 · Apothecary & stand | Grinding, hot and cold infusions, decoctions; discovered effects and recipes; roadside stand with passers-by; posted orders with feedback; the full loop | Done |
-| M8 · The garden | Seed saving and sowing, beds, germination and tending | Next |
+| M8 · The garden | Seed envelope and divisions, four raised beds, germination with stratification, growth, care, frost, life cycles, harvest from the beds | Done |
+| MVP polish | Start screen, field-notes guide through the whole loop, synthesized ambient sound, help overlay | Done |
+| Next | Creatures (ecological clues, tameable helpers), town market, more maps | Planned |
 
 ## Controls
 
@@ -27,7 +29,7 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | Thumbstick forward (or hand teleport) | Walk |
 | Look steadily at a plant | Identify it (its name appears above your left hand) |
 | Reach down to a plant, squeeze grip / pinch, hold | Harvest with the tool in your right hand |
-| Right B or thumbstick click | Next tool (hands → knife → trowel) |
+| Right B or thumbstick click | Next tool (hands → knife → trowel → seed envelope) |
 | Left Y | Gloves on/off |
 | Left X or Menu | Satchel panel: basket (smell / taste / toss), tools, journal |
 | Right A, or pinch at a station | Use it: bed, bench, drying racks, vent, jar shelf, seed catalog, cellar, stand. Its panel floats in front of you; point and pull the trigger, or poke, to press |
@@ -40,9 +42,10 @@ A VR foraging and apothecary game set on a Southern Illinois homestead, built wi
 | Click, mouse · WASD · Shift | Look · walk · hurry |
 | Look at a plant | Steady look identifies it; HUD shows its stage and what your tool would take |
 | Hold left mouse | Harvest (within 3 m) |
-| 1 / 2 / 3 · G | Hands / knife / trowel · gloves |
-| E | Use what's in front of you (bed, bench, racks, vent, shelf, seed catalog, cellar, stand). E or Esc closes the panel; time keeps running |
-| Tab or J | Satchel: basket, Field Journal, recipes, ledger |
+| 1 / 2 / 3 / 4 · G | Hands / knife / trowel / seed envelope · gloves |
+| E | Use what's in front of you (bed, bench, racks, vent, shelf, seed catalog, cellar, garden, stand). E or Esc closes the panel; time keeps running |
+| Tab or J | Satchel: field notes, basket, Field Journal, recipes, ledger |
+| H · M | Help overlay · sound on/off |
 | `` ` `` | Dev view: real names, habitat values, limiting factor, frame budget |
 | Z · X | Habitat overlays · where the plant you're looking at can grow |
 | `[` `]` · `,` `.` · `-` `=` | ±1 week · ±1 day · ±1 hour |
@@ -80,6 +83,24 @@ Walk into every building: walls stop you, stairs climb, and the same layout (`sr
 | **Stand** (by the road) | For sale | Sun and dust; fresh things wilt fast |
 
 What's stored shows: bundles hang green and turn tan as they dry (gray-white if they mold), jars fill the shelf, crates the cellar, goods the stand. Everything catches up each morning for the days that passed. Overnight news (dried bundles, sales, new orders) comes with the morning toast; the satchel's ledger keeps it.
+
+## The garden (M8)
+
+Four raised beds east of the house, six spots each. Use them from the garden panel (E by the beds); harvest from them with your tools like any wild plant.
+
+- **Planting stock.** The **seed envelope** (key 4) collects ripe seed from wild or garden plants: late summer and fall for most, from standing seed heads into winter (weathered seed germinates worse). The **trowel** lifts a living **division** from perennials with no root to take (peppermint is a sterile hybrid: divisions only). Fresh roots of perennials (horseradish) replant too. The old owner's labeled seed packets are in the tack room's seed catalog to start you off.
+- **Germination** follows each species: cool-season seed comes up in 40s °F soil, warm-season seed waits for the upper 50s, and the soil has to be moist. **Native perennial seed needs a cold, damp winter first**: sow it in fall, or keep the packet in the root cellar over winter to bank the chill. Sown in spring without it, it never comes up, and the journal notes why.
+- **Growth** depends on warmth, water, weeds, and how well the plant suits full sun and rich bed soil. Raised beds dry fast in summer heat: water them. Weeds come up all season: pull them. Drought costs health, and a plant can dry out and die.
+- **Life cycles:** annuals flower a couple of months after they come up (chamomile sown in late March blooms in early June), set seed and die; frost kills tender ones like calendula. Biennials make a rosette the first year and bloom the second. Perennials from seed mostly wait a year to bloom; divisions bloom right away. Cut-back perennials regrow from the crown.
+- **Storage:** seed keeps for years in the seed catalog, a little worse elsewhere; divisions wilt within days out of soil unless kept in the cellar. Seed packets and divisions sell at the stand to other gardeners.
+
+## Field notes
+
+New players get a guide in the satchel (and the next step in the HUD): learn three plants, gather, hang a bundle, dry it, brew, learn what it does, sell at the stand, fill an order, plant the garden, save wild seed, harvest your own, save $30. Each note finishes itself when you've done it, however you get there.
+
+## Sound
+
+Synthesized live, no audio files: wind, rain (a muffled drum on the roof indoors), songbirds by day with a spring dawn chorus, spring peepers on cool March–April nights, crickets on warm summer nights at the rate the temperature sets (Dolbear's law), thunder in storms.
 
 ## The apothecary and the stand (M7)
 
@@ -169,8 +190,11 @@ src/
     market.ts             M7 stand sales, orders, delivery feedback
     homestead.ts          moving, tasting, brewing, delivering; the daily catch-up
     stations.ts           station panels as data (rendered by desktop and VR)
+    garden.ts             M8 beds, germination, growth, care, life cycles, seed and division stock
+    goals.ts              field notes (the new-player guide)
   interact/               desktop and VR controls, VR panels
   ui/                     satchel, station panel, toasts, fade
+  audio/ambience.ts       synthesized ambient sound
   data/plants.ts          typed plant database
   sim/                    pure TypeScript, runs in the worker and in tests
     grid.ts               2 m habitat grid
@@ -185,13 +209,14 @@ src/
     treeMeshes.ts         branch and crown builders
     woody.ts              trees and shrubs, seasonal crowns
     wind.ts               wind sway shader plugin
+    garden.ts             garden plants, label stakes, weeds, wet soil
   world/                  map, terrain, buildings, sky, structural woods
     layout.ts             M6 every wall, floor, stair and station (walk + render + teleport)
     walk.ts               floors, stairs, walls, gravity
     props.ts              stored things made visible; colliders.ts for VR teleport
   xr/                     WebXR setup, desktop walker / fly camera
   debug/                  HUD, habitat overlays
-tests/                    ecology, phenology, geometry, climate, foraging, homestead, layout
+tests/                    ecology, phenology, geometry, climate, foraging, homestead, layout, garden
 ```
 
 ## Develop

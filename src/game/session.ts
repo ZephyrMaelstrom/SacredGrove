@@ -30,6 +30,9 @@ import { smell, taste, discard, catchUp, finishJobs, type Result as ActionResult
 import { actStation, isPanelStation, newDraft, viewStation, type BenchDraft, type PanelView } from "./stations";
 import { layout, ROOM_NAMES, type RoomId, type Station, type StationId } from "../world/layout";
 import { DAYS_IN_YEAR } from "../sim/phenology";
+import { SLOTS, plantingLook } from "./garden";
+import { checkGoals, nextGoal } from "./goals";
+import { plantByLatin } from "../data/plants";
 import { TOOLS, TOOL_NAMES, choose, type Tool } from "./harvest";
 import { basketWeight, BASKET_CAPACITY_G } from "./basket";
 import {
@@ -40,7 +43,7 @@ import type { Fader } from "../ui/fader";
 import type { Toasts } from "../ui/toast";
 
 /** Seconds each tool takes. Digging is work. */
-const HARVEST_SECONDS: Record<Tool, number> = { hand: 0.45, knife: 0.9, trowel: 1.6 };
+const HARVEST_SECONDS: Record<Tool, number> = { hand: 0.45, knife: 0.9, trowel: 1.6, envelope: 0.8 };
 const EXAMINE_SECONDS = 1.6;
 
 export type Interactable = Station;
@@ -96,6 +99,10 @@ export class Session {
     this.listeners.push(fn);
   }
   private emit() {
+    for (const g of checkGoals(this.state)) {
+      const next = nextGoal(this.state);
+      this.toasts.show(`Field note done: ${g.title}`, next ? `Next: ${next.title}. ${next.hint}` : "That's every field note. The land is yours to learn.");
+    }
     for (const fn of this.listeners) fn();
   }
 
@@ -190,6 +197,8 @@ export class Session {
 
   /** The plant at a ground point (herbs first, then woody within reach). */
   targetAt(x: number, z: number, herbReach = 0.6, woodyReach = 1.4): Target | null {
+    const g = this.gardenTarget(x, z, Math.max(0.42, herbReach));
+    if (g) return g;
     const herb = this.herbs.nearest(x, z, herbReach);
     const tree = this.woody.nearest(x, z, woodyReach);
     if (herb && (!tree || herb.distance < tree.distance + 0.3)) {
@@ -204,6 +213,23 @@ export class Session {
     return null;
   }
 
+  /** A planting in the raised beds near (x, z) that has something showing. */
+  private gardenTarget(x: number, z: number, reach: number): Target | null {
+    let best: Target | null = null, bestD = reach;
+    const c = this.state.clock;
+    for (const spot of SLOTS) {
+      const d = Math.hypot(spot.x - x, spot.z - z);
+      if (d >= bestD) continue;
+      const pl = this.state.garden.slots[spot.index];
+      if (!pl) continue;
+      const plant = plantByLatin(pl.latin);
+      if (!plantingLook(pl, plant, c.doy, c.year, this.season, absDay(c))) continue;
+      bestD = d;
+      best = { layer: "g", index: spot.index, plant, cohort: pl.upYear !== null && c.year > pl.upYear ? 1 : 0, x: spot.x, z: spot.z, scale: 0.4 + 0.8 * pl.size, zone: "Kitchen garden", suitability: pl.health };
+    }
+    return best;
+  }
+
   private nodeAt(x: number, z: number) {
     // Tree-line trees stand just past the habitat grid: clamp to its edge.
     return Math.max(0, nodeAt(Math.max(-80, Math.min(80, x)), Math.max(0, Math.min(400, z))));
@@ -216,13 +242,19 @@ export class Session {
 
   lookOf(t: Target): Appearance {
     if (t.layer === "h") return this.herbs.appearanceOf(t.index);
+    if (t.layer === "g") {
+      const pl = this.state.garden.slots[t.index];
+      const c = this.state.clock;
+      return (pl && plantingLook(pl, t.plant, c.doy, c.year, this.season, absDay(c))) ?? { stage: "absent", visual: null, growth: 0, leafy: false };
+    }
     return appearance(t.plant, this.state.clock.doy, 1, this.season);
   }
 
   /** How the player sees this plant: real name only once identified. */
   displayName(t: Target): string {
     const e = this.state.journal[t.plant.latin];
-    return e?.identified ? t.plant.name : `Unknown ${FORM_WORDS[t.plant.form] ?? "plant"}`;
+    const labeled = t.layer === "g" && this.state.garden.slots[t.index]?.labeled;
+    return e?.identified || labeled ? t.plant.name : `Unknown ${FORM_WORDS[t.plant.form] ?? "plant"}`;
   }
   isIdentified(p: Plant) {
     return !!this.state.journal[p.latin]?.identified;
@@ -230,6 +262,7 @@ export class Session {
 
   /** Words for what the current tool would take, for the HUD. */
   preview(t: Target): string {
+    if (this.state.tool === "envelope") return "Seed envelope: collect seed";
     const pick = choose(this.state.tool, { plant: t.plant, look: this.lookOf(t), doy: this.state.clock.doy, season: this.season, cohort: t.cohort });
     if (!pick.ok) return "";
     return this.isIdentified(t.plant) ? `${TOOL_NAMES[this.state.tool]}: take ${pick.product.name}` : `${TOOL_NAMES[this.state.tool]}: take a ${pick.product.part.toLowerCase()} sample`;
@@ -286,7 +319,7 @@ export class Session {
 
   private doHarvest(t: Target) {
     const r = harvest(this.state, this.harvestState, t, { look: this.lookOf(t), season: this.season, weather: this.weather });
-    this.toasts.show(r.message, r.detail);
+    if (r.message) this.toasts.show(r.message, r.detail);
     if (r.changed) {
       this.updateVisibilityHook();
       this.herbs.invalidate();
@@ -336,6 +369,13 @@ export class Session {
     return best;
   }
 
+  /** Work takes time: the clock moves on (a new day refreshes everything). */
+  spendMinutes(minutes: number) {
+    const ev = tick(this.state, minutes);
+    if (ev.newYear) this.harvestState.rollover(this.state.clock.year);
+    if (ev.newDay) this.refreshDay();
+  }
+
   /** Is the open panel's station still within reach (with a little slack)? */
   panelInReach(x: number, z: number, feetY: number): boolean {
     const st = layout().stations.find((s) => s.id === this.panel);
@@ -365,6 +405,7 @@ export class Session {
     if (act === "close") return this.openPanel(null);
     if (!station) return;
     const r = actStation(this.state, station, this.draft, act);
+    if (r?.ok && r.minutes) this.spendMinutes(r.minutes);
     if (r) this.report(r);
     else this.emit();
     if (r?.collapse) {

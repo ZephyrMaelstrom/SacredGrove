@@ -1,4 +1,4 @@
-import { Color3, Engine, MeshBuilder, PointLight, Scene, Vector3 } from "@babylonjs/core";
+import { Color3, Engine, MeshBuilder, PointLight, Scene, Vector3, WebXRState } from "@babylonjs/core";
 import { createSky } from "./world/sky";
 import { createTerrain } from "./world/terrain";
 import { createHomestead } from "./world/buildings";
@@ -9,7 +9,7 @@ import { createDesktopCamera, EYE_HEIGHT } from "./xr/desktopControls";
 import { createHud } from "./debug/hud";
 import { applyOverlay, OVERLAY_CYCLE, OVERLAY_LABEL, type OverlayMode } from "./debug/overlay";
 import { startSimulation } from "./sim/client";
-import { DAYS_IN_YEAR } from "./sim/phenology";
+import { DAYS_IN_YEAR, formatDoy } from "./sim/phenology";
 import { HerbRenderer, QUALITY } from "./veg/herbs";
 import { WoodyRenderer } from "./veg/woody";
 import { Session } from "./game/session";
@@ -23,6 +23,8 @@ import { StationPanel } from "./ui/stationPanel";
 import { HomesteadProps } from "./world/props";
 import { createColliders } from "./world/colliders";
 import { layout } from "./world/layout";
+import { GardenRenderer } from "./veg/garden";
+import { Ambience } from "./audio/ambience";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const loading = document.getElementById("loading")!;
@@ -103,6 +105,7 @@ async function boot() {
 
   // --- The game.
   const fader = new Fader(scene);
+  const ambience = new Ambience();
   const toasts = new Toasts();
   const session = new Session(sky, terrain, herbs, woody, sim.habitat, sim.population, fader, toasts);
   session.timelapse = params.has("timelapse");
@@ -127,8 +130,13 @@ async function boot() {
   });
   const vr = xr ? setupVrForaging(scene, xr, session, herbs, toasts) : null;
   session.openJournal = () => (vr && scene.activeCamera === xr!.baseExperience.camera ? vr.showJournal() : satchel.show("journal"));
-  props.update(session.state);
-  session.subscribe(() => props.update(session.state));
+  const garden = new GardenRenderer(scene);
+  const refreshWorld = () => {
+    props.update(session.state);
+    garden.update(session.state, session.season);
+  };
+  refreshWorld();
+  session.subscribe(refreshWorld);
 
   let overlay: OverlayMode = (params.get("overlay") as OverlayMode) ?? "natural";
   if (!OVERLAY_CYCLE.includes(overlay)) overlay = "natural";
@@ -154,6 +162,7 @@ async function boot() {
     structural.setLight(sky.daylight());
     input.update(dt);
     if (vegetationOn) herbs.update(cam.globalPosition);
+    ambience.update({ doy: session.state.clock.doy, minutes: session.state.clock.minutes, weather: session.weather, indoors: session.room !== null }, dt);
   });
 
   // --- Debug keys (see README).
@@ -192,9 +201,50 @@ async function boot() {
   loading.classList.add("hidden");
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());
-  if (!resumed) {
-    setTimeout(() => toasts.show("March 10. The old place is yours now.", "Look closely at plants to identify them; hold the left mouse button to harvest. Hang what you gather in the barn loft to dry, brew at the bench, sell at the stand. E uses things; Tab opens your satchel. Your bed is upstairs in the house."), 800);
+
+  // ---- Start screen: time waits until you begin (and sound may only start after a click).
+  const start = document.getElementById("start")!;
+  const btns = document.getElementById("startBtns")!;
+  const help = document.getElementById("help")!;
+  let begun = false;
+  session.paused = true;
+  const begin = () => {
+    if (begun) return;
+    begun = true;
+    start.classList.remove("open");
+    session.paused = false;
+    ambience.start();
+    if (params.has("new")) history.replaceState(null, "", location.pathname);
+    if (!resumed) {
+      help.classList.remove("hidden");
+      setTimeout(() => help.classList.add("hidden"), 60000);
+      setTimeout(() => toasts.show("March 10. The old place is yours now.", "Your satchel's field notes (Tab) will walk you through a first season. Start by looking closely at a few plants."), 600);
+    }
+    canvas.requestPointerLock?.();
+  };
+  const button = (label: string, fn: () => void, alt = false) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (alt) b.className = "alt";
+    b.onclick = fn;
+    btns.appendChild(b);
+  };
+  if (resumed) {
+    const c = session.state.clock;
+    button(`Continue · Year ${c.year}, ${formatDoy(c.doy)}`, begin);
+    button("New game", () => {
+      if (confirm("Start over? Your saved game will be erased.")) location.search = "?new";
+    }, true);
+  } else {
+    button("Begin", begin);
   }
+  start.classList.add("open");
+  xr?.baseExperience.onStateChangedObservable.add((st) => { if (st === WebXRState.IN_XR) begin(); });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "h" || e.key === "H") help.classList.toggle("hidden");
+    if (e.key === "m" || e.key === "M") toasts.show(ambience.toggleMute() ? "Sound off" : "Sound on");
+  });
 
   // Handy in the browser console while building.
   Object.assign(window as unknown as Record<string, unknown>, { scene, engine, sim, herbs, woody, session, layout: layout() });

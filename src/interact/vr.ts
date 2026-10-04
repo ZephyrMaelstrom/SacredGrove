@@ -26,9 +26,10 @@ import type { Session } from "../game/session";
 import { VrPanel } from "./vrPanel";
 import { layout } from "../world/layout";
 import { roomAt } from "../world/walk";
-import { isPrep } from "../game/items";
+import { isPrep, isStock } from "../game/items";
 import { itemName, prepSummary } from "../game/homestead";
 import { effectWord, type PanelView } from "../game/stations";
+import { nextGoal } from "../game/goals";
 import type { Target } from "../game/forage";
 import { TOOL_NAMES, type Tool } from "../game/harvest";
 import { describe, temperatureAt } from "../time/climate";
@@ -78,7 +79,12 @@ function toolMeshes(scene: Scene) {
   tScoop.rotation.x = Math.PI / 2;
   tScoop.position.z = -0.13;
   tScoop.material = steel;
-  return { knife: make("knifeTool", [kHandle, kBlade]), trowel: make("trowelTool", [tHandle, tScoop]) };
+  const paper = new StandardMaterial("envelopePaper", scene);
+  paper.diffuseColor = new Color3(0.86, 0.8, 0.64);
+  const env = MeshBuilder.CreateBox("env", { width: 0.09, height: 0.005, depth: 0.12 }, scene);
+  env.position.z = -0.06;
+  env.material = paper;
+  return { knife: make("knifeTool", [kHandle, kBlade]), trowel: make("trowelTool", [tHandle, tScoop]), envelope: make("envelopeTool", [env]) };
 }
 
 export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, session: Session, herbs: HerbRenderer, toasts: Toasts) {
@@ -290,6 +296,8 @@ export function setupVrForaging(scene: Scene, xr: WebXRDefaultExperience, sessio
     const near = session.nearbyInteractable(cam.globalPosition.x, cam.globalPosition.z, feetY());
     if (near && !stationPanel.open) lines.push(`A / pinch at it: ${near.label}`);
     if (session.panel === "bench" && session.draft.mortar) lines.push("Squeeze in the mortar and stir to grind");
+    const goal = nextGoal(s);
+    if (goal && !lastToast) lines.push(`Note: ${goal.title}`);
     if (toasts.last && toasts.last !== lastToast) lastToast = toasts.last;
     if (lastToast) lines.push(lastToast);
     wristText.text = lines.join("\n");
@@ -311,9 +319,9 @@ function satchelView(session: Session, tab: SatchelTab): PanelView {
       sections: [tabs, {
         note: s.basket.length ? undefined : "Empty. Reach to a plant and squeeze or pinch to harvest.",
         rows: s.basket.map((it) => ({
-          text: isPrep(it) ? `${it.name} · ${it.volumeMl} ml` : `${itemName(s, it)} · ${it.grams} g`,
-          sub: isPrep(it) ? prepSummary(it) : `${it.part} · ${herbCondition(it)}`,
-          bar: isPrep(it) ? undefined : Math.round(it.potency),
+          text: isPrep(it) ? `${it.name} · ${it.volumeMl} ml` : isStock(it) ? `${itemName(s, it)}${it.form === "seed" ? ` · ${it.count}` : ""}` : `${itemName(s, it)} · ${it.grams} g`,
+          sub: isPrep(it) ? prepSummary(it) : isStock(it) ? (it.form === "seed" ? "seed packet" : "division") : `${it.part} · ${herbCondition(it)}`,
+          bar: isPrep(it) ? undefined : isStock(it) ? Math.round(it.viability) : Math.round(it.potency),
           buttons: [
             ...(isPrep(it) ? [] : [{ label: "Smell", act: `smell:${it.id}` }]),
             { label: "Taste", act: `taste:${it.id}`, warn: true },
@@ -327,9 +335,9 @@ function satchelView(session: Session, tab: SatchelTab): PanelView {
     return {
       title: "Satchel",
       sections: [tabs, {
-        note: "Hands: leaves, flowers, fruit, seed. Knife: bark, sap, whole stems. Trowel: roots, rhizomes, bulbs. Poison ivy, nettle, wild parsnip sap and thorns hurt bare hands.",
+        note: "Hands: leaves, flowers, fruit. Knife: bark, sap, whole stems. Trowel: roots, or a living division of perennials. Seed envelope: ripe seed for the garden. Poison ivy, nettle, wild parsnip sap and thorns hurt bare hands.",
         rows: [
-          { text: "Tool", buttons: (["hand", "knife", "trowel"] as Tool[]).map((t) => ({ label: TOOL_NAMES[t], act: `tool:${t}`, on: s.tool === t })) },
+          { text: "Tool", buttons: (["hand", "knife", "trowel", "envelope"] as Tool[]).map((t) => ({ label: TOOL_NAMES[t], act: `tool:${t}`, on: s.tool === t })) },
           { text: s.gloves ? "Wearing gloves" : "Bare-handed", buttons: [{ label: s.gloves ? "Gloves off" : "Gloves on", act: "gloves" }] },
         ],
       }],

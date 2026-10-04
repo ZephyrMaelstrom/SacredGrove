@@ -12,14 +12,16 @@ import { EFFECT_WORDS, type EffectTag } from "../data/plants";
 import { absDay } from "../time/clock";
 import type { DayWeather } from "../time/climate";
 import type { StationId } from "../world/layout";
-import { isHerb, isPrep, METHOD_NAMES, servings, type HerbLot, type Item, type Method } from "./items";
+import { isHerb, isPrep, isStock, METHOD_NAMES, servings, type HerbLot, type Item, type Method } from "./items";
 import { PLACES, conditions, herbCondition, canStore, type PlaceId } from "./storage";
 import { canGrind, flavorWords, BREW_LIMITS } from "./apothecary";
 import {
-  collectCash, deliver, discard, findItem, grindItem, itemName, listOf, move, prepSummary, smell, startBrew, taste,
+  collectCash, deliver, discard, sow, waterBeds, weedBeds, pullPlant, findItem, grindItem, itemName, listOf, move, prepSummary, smell, startBrew, taste,
   money, value, MAX_POTS, type Result,
 } from "./homestead";
 import { STAND_RATE } from "./market";
+import { SLOTS, BED_COUNT, sowable, plantingStatus } from "./garden";
+import { plantByLatin } from "../data/plants";
 import { absMinute, type GameStateData, type StoragePlace } from "./state";
 
 // ---------------------------------------------------------------- view model
@@ -69,7 +71,7 @@ export interface StationContext {
 }
 
 const STORAGE: Partial<Record<StationId, StoragePlace>> = { loft: "loft", cellar: "cellar", tack: "tack", shelf: "shelf" };
-export const isPanelStation = (id: StationId) => id in STORAGE || id === "bench" || id === "stand";
+export const isPanelStation = (id: StationId) => id in STORAGE || id === "bench" || id === "stand" || id === "garden";
 
 // ---------------------------------------------------------------- shared rows
 
@@ -87,6 +89,14 @@ export function itemRow(s: GameStateData, it: Item, buttons: Btn[] = []): Row {
       text: `${it.name} · ${cups} cup${cups > 1 ? "s" : ""}`,
       sub: `${prepSummary(it)} · ${it.description}${left}`,
       tone: it.spoiled ? "warn" : it.known ? "good" : undefined,
+      buttons,
+    };
+  }
+  if (isStock(it)) {
+    return {
+      text: `${itemName(s, it)}${it.form === "seed" ? ` · ${it.count} seeds` : ""}`,
+      sub: `${it.form === "seed" ? "seed packet" : "living division — plant it soon or keep it in the cellar"}${it.chill ? ` · ${it.chill} cold days banked` : ""}`,
+      bar: Math.round(it.viability),
       buttons,
     };
   }
@@ -109,6 +119,7 @@ export function viewStation(s: GameStateData, id: StationId, draft: BenchDraft, 
   if (place) return storageView(s, place, ctx);
   if (id === "bench") return benchView(s, draft);
   if (id === "stand") return standView(s);
+  if (id === "garden") return gardenView(s, ctx);
   return { title: "", sections: [] };
 }
 
@@ -254,6 +265,50 @@ function standView(s: GameStateData): PanelView {
   return { title: "Roadside stand", subtitle: `Reputation ${Math.round(s.reputation)}/100 · ${money(s.money)} in your pocket`, sections };
 }
 
+const moistWord = (m: number) => (m > 0.75 ? "wet" : m > 0.45 ? "moist" : m > 0.25 ? "drying" : m > 0.12 ? "dry" : "parched");
+
+function gardenView(s: GameStateData, ctx: StationContext): PanelView {
+  const day = absDay(s.clock), doy = s.clock.doy, year = s.clock.year;
+  const soil = Math.round((ctx.weather.highF + ctx.weather.lowF) / 2 + 2);
+  const stock = s.basket.filter((i) => sowable(i));
+  const sections: Section[] = [{
+    note: `Soil about ${soil} °F today. Cool-season seed comes up in the 40s, warm-season in the upper 50s; tender plants die in a frost (last frost is usually mid-April, first frost late October). Native perennial seed needs a cold, damp winter first.${stock.length ? "" : " Bring seed or divisions in your basket to plant."}`,
+    rows: [],
+    buttons: [{ label: "Water all (20 min)", act: "gwater:all" }, { label: "Weed all", act: "gweed:all" }],
+  }];
+  for (let b = 0; b < BED_COUNT; b++) {
+    const bed = s.garden.beds[b];
+    const rows: Row[] = [];
+    for (const spot of SLOTS.filter((x) => x.bed === b)) {
+      const pl = s.garden.slots[spot.index];
+      const label = spot.label.split(", ")[1];
+      if (!pl) {
+        rows.push({
+          text: `${label} · empty`,
+          tone: "dim",
+          buttons: stock.slice(0, 3).map((i) => ({ label: `${sowable(i)!.form === "seed" ? "Sow" : "Plant"} ${shortName(itemName(s, i).replace(/ seed$| division$/, ""))}`, act: `sow:${spot.index}:${i.id}` })),
+        });
+        continue;
+      }
+      const p = plantByLatin(pl.latin);
+      const known = s.journal[p.latin]?.identified || pl.labeled;
+      rows.push({
+        text: `${label} · ${known ? p.name : "Unknown plant"}`,
+        sub: plantingStatus(pl, p, doy, year, day),
+        bar: pl.upDay === null ? undefined : Math.round(pl.size * 100),
+        tone: pl.dead ? "warn" : undefined,
+        buttons: [{ label: pl.dead ? "Clear" : "Pull", act: `pull:${spot.index}`, warn: !pl.dead }],
+      });
+    }
+    sections.push({
+      title: `Bed ${b + 1} · soil ${moistWord(bed.moisture)} · weeds ${Math.round(bed.weeds * 100)}%`,
+      rows,
+      buttons: [{ label: "Water (5 min)", act: `gwater:${b}` }, { label: `Weed (${Math.round(4 + 20 * bed.weeds)} min)`, act: `gweed:${b}`, disabled: bed.weeds < 0.03 }],
+    });
+  }
+  return { title: "Kitchen garden", subtitle: `${s.garden.slots.filter((x) => x && !x.dead).length}/${SLOTS.length} spots growing.`, sections };
+}
+
 const shortName = (n: string) => (n.length > 18 ? n.slice(0, 17) + "…" : n);
 
 function pruneDraft(s: GameStateData, d: BenchDraft) {
@@ -327,6 +382,10 @@ export function actStation(s: GameStateData, id: StationId, d: BenchDraft, act: 
     case "unmortar":
       d.mortar = null;
       return null;
+    case "sow": return sow(s, Number(a), b);
+    case "gwater": return waterBeds(s, a === "all" ? "all" : Number(a));
+    case "gweed": return weedBeds(s, a === "all" ? "all" : Number(a));
+    case "pull": return pullPlant(s, Number(a));
     case "collect": return collectCash(s);
     case "give": return deliver(s, a, b);
   }

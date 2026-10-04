@@ -16,7 +16,7 @@
 import { EFFECT_WORDS, type EffectTag } from "../data/plants";
 import { rng, mixSeed } from "../sim/random";
 import type { DayWeather } from "../time/climate";
-import { isHerb, isPrep, servings, newId, FULL_CUP_ML, CUP_ML, type HerbLot, type Item, type PrepItem } from "./items";
+import { isHerb, isPrep, isStock, servings, newId, FULL_CUP_ML, CUP_ML, type HerbLot, type Item, type PrepItem } from "./items";
 import { perceivedBitter, productById } from "./apothecary";
 
 export const STAND_RATE = 0.6;
@@ -34,6 +34,11 @@ export function value(i: Item): number {
     const flavor = (i.effects.flavor ?? 0) * 120;
     const per = (30 + 450 * best + flavor) * taste * (i.toxicity >= 0.3 ? 0.05 : 1);
     return Math.round(per * servings(i));
+  }
+  if (isStock(i)) {
+    // Heirloom seed and divisions for other gardeners.
+    if (i.form === "division") return Math.round(300 * (i.viability / 100));
+    return Math.round(Math.min(1, i.count / 40) * 250 * (i.viability / 100));
   }
   if (i.state === "moldy" || i.state === "spoiled") return 0;
   const base = productById(i.productId)?.product.basePrice ?? 5;
@@ -71,7 +76,7 @@ export interface DaySales {
 }
 
 /** A herb lot sold as a remedy only counts if it actually has that effect (customers can tell, eventually). */
-const herbEffect = (l: HerbLot, tag: EffectTag) => (productById(l.productId)?.product.effects[tag] ?? 0) * (l.potency / 100) * (l.state === "dried" ? 1 : 0.6);
+const herbEffect = (l: HerbLot, tag: EffectTag) => !isHerb(l) ? 0 : (productById(l.productId)?.product.effects[tag] ?? 0) * (l.potency / 100) * (l.state === "dried" ? 1 : 0.6);
 
 export function simulateStandDay(stand: Item[], absDay: number, doy: number, w: DayWeather, reputation: number, seed: number): DaySales {
   const r = rng(mixSeed(seed ^ 0x57a9d, absDay));
@@ -94,6 +99,10 @@ export function simulateStandDay(stand: Item[], absDay: number, doy: number, w: 
         out.reputation -= 15;
         out.notes.push(`Someone who bought ${it.name} came back sick. Word gets around.`);
       }
+    } else if (isStock(it)) {
+      cents = Math.round(value(it) * STAND_RATE);
+      name = it.form === "seed" ? `a packet of ${it.name} seed` : `a ${it.name} division`;
+      stand.splice(stand.indexOf(it), 1);
     } else {
       const g = Math.min(it.grams, 100);
       const portion: HerbLot = { ...it, grams: g };
@@ -120,7 +129,11 @@ export function simulateStandDay(stand: Item[], absDay: number, doy: number, w: 
       // Kitchen herbs and nice teas.
       const options = sellable.filter((i) => isPrep(i) ? (i.effects.flavor ?? 0) > 0.3 || perceivedBitter(i.flavor) < 0.2 : herbEffect(i as HerbLot, "flavor") + herbEffect(i as HerbLot, "food") > 0.25);
       if (options.length) sell(options[Math.floor(r() * options.length)], "for the kitchen");
-    } else if (r() < 0.5) {
+    } else if (kind < 0.88) {
+      // Gardeners after seed and starts.
+      const stock = sellable.filter(isStock);
+      if (stock.length) sell(stock[Math.floor(r() * stock.length)], "for their garden");
+    } else if (r() < 0.75) {
       const cheap = sellable.slice().sort((a, b) => value(a) - value(b))[0];
       if (cheap) sell(cheap, "on a whim");
     }

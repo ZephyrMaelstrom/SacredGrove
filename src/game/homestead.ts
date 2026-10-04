@@ -9,12 +9,13 @@
 import { PLANTS, type EffectTag } from "../data/plants";
 import { absDay } from "../time/clock";
 import type { DayWeather } from "../time/climate";
-import { isHerb, isPrep, itemGrams, newId, servings, CUP_ML, FULL_CUP_ML, type HerbLot, type Item, type Method, type PrepItem } from "./items";
+import { isHerb, isPrep, isStock, itemGrams, newId, servings, CUP_ML, FULL_CUP_ML, type HerbLot, type Item, type Method, type PrepItem } from "./items";
 import { BASKET_CAPACITY_G, basketWeight } from "./basket";
 import { PLACES, canStore, stepItems, type PlaceId } from "./storage";
 import { brew, canGrind, grind, productById, tastePrep, BREW_LIMITS, strengthWord } from "./apothecary";
 import { deliver as deliverOrder, makeOrder, money, simulateStandDay, value } from "./market";
-import { learnEffect, recordSmell, recordTaste, tasteOutcome, type Protocol } from "./journal";
+import { learnEffect, note, recordSmell, recordTaste, tasteOutcome, type Protocol } from "./journal";
+import { plant as plantSlot, pull, stepGarden, usedUp, water, weed, BED_COUNT } from "./garden";
 import { addStatus, absMinute, hasStatus, log, type GameStateData, type StoragePlace } from "./state";
 import { WORLD_SEED } from "../sim/placement";
 import { EFFECT_WORDS } from "../data/plants";
@@ -24,6 +25,8 @@ export interface Result {
   message: string;
   detail?: string;
   collapse?: boolean;
+  /** Game minutes the work took (the clock moves on). */
+  minutes?: number;
 }
 const fail = (message: string): Result => ({ ok: false, message });
 
@@ -44,6 +47,10 @@ const plantOf = (latin: string) => PLANTS.find((p) => p.latin === latin)!;
 export function itemName(s: GameStateData, i: Item): string {
   if (isPrep(i)) return i.name;
   const known = s.journal[i.latin]?.identified;
+  if (isStock(i)) {
+    const named = known || i.labeled;
+    return i.form === "seed" ? `${named ? i.name : "Unknown"} seed` : `${named ? i.name : "Unknown plant"} division`;
+  }
   return known ? i.productName : `Unknown ${i.part.toLowerCase()}`;
 }
 
@@ -95,6 +102,7 @@ export function smell(s: GameStateData, id: string): Result {
   if (!found) return fail("");
   const it = found.item;
   if (isPrep(it)) return { ok: true, message: `${it.name}: ${it.description}.` };
+  if (isStock(it)) return { ok: true, message: it.form === "seed" ? "Dry seed: dusty, faintly nutty." : "Damp roots and soil." };
   const info = productById(it.productId);
   if (!info) return fail("");
   recordSmell(s.journal, plantOf(it.latin), info.product, absDay(s.clock));
@@ -109,6 +117,7 @@ export function taste(s: GameStateData, id: string): Result {
   const it = found.item;
   const day = absDay(s.clock);
   const list = listOf(s, found.place);
+  if (isStock(it)) return fail("That's your planting stock. Grow it first.");
 
   if (isPrep(it)) {
     const t = tastePrep(it);
@@ -312,6 +321,24 @@ export function catchUp(s: GameStateData, weather: WeatherLookup): string[] {
     // Ruined lots stay until you toss them (so you notice), but finished brews that turned are poured out at the stand.
   }
   notes.push(...stepItems(s.basket, "basket", weather, today, { ventOpen: s.ventOpen, slots: 0 }));
+  // Storage gets rid of anything used up (stock packets sown to nothing).
+  for (const place of ["basket", "loft", "cellar", "tack", "shelf", "stand"] as PlaceId[]) {
+    const list = listOf(s, place);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const it = list[i];
+      if (isStock(it) && (it.count <= 0 || (it.form === "division" && it.viability <= 0))) list.splice(i, 1);
+    }
+  }
+
+  // The garden lives through each day.
+  for (let d = s.garden.updatedDay + 1; d <= today; d++) {
+    const { w, doy } = weather(d);
+    const year = Math.floor((d - 1) / 365) + 1;
+    for (const n of stepGarden(s.garden, d, year, doy, w)) {
+      notes.push(n.text);
+      if (n.learn) note(s.journal, plantOf(n.learn.latin), d, n.learn.note);
+    }
+  }
 
   // Each day since we last looked: stand sales, orders.
   for (let d = s.lastSimDay; d < today; d++) {
@@ -369,3 +396,37 @@ export function prepSummary(p: PrepItem): string {
 export { value, money };
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const capital = (t: string) => t[0].toUpperCase() + t.slice(1);
+
+// ---------------------------------------------------------------- garden
+
+export function sow(s: GameStateData, slot: number, itemId: string): Result {
+  const found = findItem(s, itemId);
+  if (!found) return fail("");
+  const r = plantSlot(s.garden, slot, found.item, absDay(s.clock), s.clock.year);
+  if (r.ok) {
+    s.stats.planted = (s.stats.planted ?? 0) + 1;
+    if (usedUp(found.item)) {
+      const list = listOf(s, found.place);
+      list.splice(list.indexOf(found.item), 1);
+    }
+  }
+  return r;
+}
+
+export function waterBeds(s: GameStateData, bed: number | "all"): Result {
+  if (bed !== "all") return water(s.garden, bed);
+  let minutes = 0;
+  for (let b = 0; b < BED_COUNT; b++) minutes += water(s.garden, b).minutes ?? 0;
+  return { ok: true, message: "You water all four beds from the rain barrel.", minutes };
+}
+
+export function weedBeds(s: GameStateData, bed: number | "all"): Result {
+  if (bed !== "all") return weed(s.garden, bed);
+  let minutes = 0;
+  for (let b = 0; b < BED_COUNT; b++) minutes += weed(s.garden, b).minutes ?? 0;
+  return { ok: true, message: "You weed the whole garden.", minutes };
+}
+
+export function pullPlant(s: GameStateData, slot: number): Result {
+  return pull(s.garden, slot);
+}

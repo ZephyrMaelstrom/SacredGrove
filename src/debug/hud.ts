@@ -18,6 +18,7 @@ import { describe, temperatureAt } from "../time/climate";
 import { formatTime, seasonName } from "../time/clock";
 import { TOOL_NAMES } from "../game/harvest";
 import type { Session } from "../game/session";
+import { nextGoal } from "../game/goals";
 import type { DesktopState } from "../interact/desktop";
 import type { HerbRenderer } from "../veg/herbs";
 
@@ -72,6 +73,8 @@ export function createHud(ctx: HudContext) {
     const statuses = st.statuses.filter((x) => x.until > s.nowAbsMinute).map((x) => x.label);
     if (statuses.length) lines.push(`<span class="warnText">${statuses.join(" · ")}</span>`);
 
+    const goal = nextGoal(st);
+    if (goal && !dev) lines.push(`<span class="dim">📜 ${goal.title}</span>`);
     if (d.interactable && !s.panel) lines.push(`<span class="hint">E · ${d.interactable.label}</span>`);
     if (d.target) {
       const t = d.target;

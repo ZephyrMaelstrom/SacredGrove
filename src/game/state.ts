@@ -16,10 +16,11 @@ import { upgradeLot } from "./items";
 import type { Order } from "./market";
 import type { PlaceId } from "./storage";
 import { hashString } from "../sim/random";
-import { PLANTS } from "../data/plants";
+import { PLANTS, plantByLatin } from "../data/plants";
+import { emptyGarden, makeStock, type GardenState } from "./garden";
 
 export const SAVE_KEY = "rootwake.save.v1";
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface Status {
   id: string;
@@ -65,7 +66,25 @@ export interface GameStateData {
   /** Recent happenings, newest first. */
   ledger: { day: number; text: string }[];
   lastSimDay: number;
-  stats: { harvests: number; daysPlayed: number; brews: number; sales: number; ordersDone: number };
+  garden: GardenState;
+  /** Field notes (the guide) you've completed, by id. */
+  goals: string[];
+  stats: { harvests: number; daysPlayed: number; brews: number; sales: number; ordersDone: number; gardenHarvests?: number; planted?: number; tasted?: number; seedsSaved?: number };
+}
+
+/** The previous owner left a few seed packets in the tack room's catalog. */
+export function starterSeeds(day: number) {
+  const packets = [
+    makeStock("seed", plantByLatin("Matricaria chamomilla"), 60, 88, day - 200),
+    makeStock("seed", plantByLatin("Calendula officinalis"), 40, 84, day - 200),
+    makeStock("seed", plantByLatin("Tanacetum parthenium"), 50, 78, day - 200),
+    makeStock("seed", plantByLatin("Echinacea purpurea"), 80, 86, day - 200),
+  ];
+  for (const p of packets) {
+    p.updatedDay = day;
+    p.labeled = true;
+  }
+  return packets;
 }
 
 /**
@@ -80,6 +99,12 @@ export const absMinute = (c: ClockState) => absDay(c) * MINUTES_PER_DAY + c.minu
 const emptyStorage = (): Record<StoragePlace, Item[]> => ({ loft: [], cellar: [], tack: [], shelf: [], stand: [] });
 
 export function newGame(world: GameStateData["world"]): GameStateData {
+  const s = blankGame(world);
+  s.storage.tack.push(...starterSeeds(absDay(s.clock)));
+  return s;
+}
+
+function blankGame(world: GameStateData["world"]): GameStateData {
   return {
     version: SAVE_VERSION,
     world,
@@ -100,7 +125,9 @@ export function newGame(world: GameStateData["world"]): GameStateData {
     jobs: [],
     ledger: [],
     lastSimDay: absDay(NEW_GAME_CLOCK),
-    stats: { harvests: 0, daysPlayed: 0, brews: 0, sales: 0, ordersDone: 0 },
+    garden: emptyGarden(absDay(NEW_GAME_CLOCK)),
+    goals: [],
+    stats: { harvests: 0, daysPlayed: 0, brews: 0, sales: 0, ordersDone: 0, gardenHarvests: 0, planted: 0, tasted: 0 },
   };
 }
 
@@ -113,9 +140,9 @@ export interface LoadResult {
 function migrate(s: Record<string, unknown>): GameStateData {
   const old = s as unknown as GameStateData & { stores?: Item[] };
   const day = absDay(old.clock);
-  const fresh = newGame(old.world);
-  const out: GameStateData = { ...fresh, ...old, version: SAVE_VERSION };
-  out.basket = (old.basket ?? []).map((l) => (l.kind === "prep" ? l : upgradeLot(l, day)));
+  const fresh = blankGame(old.world);
+  const out: GameStateData = { ...fresh, ...old, version: 2 };
+  out.basket = (old.basket ?? []).map((l) => (l.kind === "prep" || l.kind === "stock" ? l : upgradeLot(l, day)));
   out.storage = emptyStorage();
   // What was unloaded "at the barn" in M5 was hung in the loft.
   out.storage.loft = (old.stores ?? []).map((l) => upgradeLot(l as never, day)).slice(0, 24);
@@ -138,6 +165,13 @@ export function restore(json: string | null, world: GameStateData["world"]): Loa
     if (s.version === 1) {
       s = migrate(s as unknown as Record<string, unknown>);
       note = "The barn's been fixed up: what you unloaded is hanging in the drying loft.";
+    }
+    if (s.version === 2) {
+      // M8: the garden opens, and the old owner's seed packets turn up in the tack room.
+      s.version = SAVE_VERSION;
+      s.garden = emptyGarden(absDay(s.clock));
+      s.storage.tack.push(...starterSeeds(absDay(s.clock)));
+      note = (note ? note + " " : "") + "You found the old owner's seed packets in the tack room. The raised beds are ready to plant.";
     } else if (s.version !== SAVE_VERSION) {
       return { state: newGame(world), note: "Old save format; starting fresh." };
     }
