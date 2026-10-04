@@ -285,7 +285,8 @@ export function stepGarden(g: GardenState, day: number, year: number, doy: numbe
     if (pl.dead) continue;
     const p = plantByLatin(pl.latin);
     const b = g.beds[Math.floor(i / SLOTS_PER_BED)];
-    const r = rng(mixSeed(hashString(pl.id), day));
+    // Deterministic per spot and sowing, so the same garden plays out the same way.
+    const r = rng(mixSeed(hashString(`${pl.latin}|${pl.sownDay}|${i}`), day));
 
     // ---- seed in the ground
     if (pl.upDay === null) {

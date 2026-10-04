@@ -145,12 +145,12 @@ describe("growing", () => {
   });
   it("frost kills tender calendula seedlings", () => {
     const g = emptyGarden(0);
-    const day0 = dayOfYear(4, 10);
+    const day0 = dayOfYear(4, 25);
     plant(g, 0, seed("Calendula officinalis"), day0, 1);
-    run(g, day0, 30, {}, keepWatered);
+    run(g, day0, 40, {}, keepWatered);
     const up = g.slots[0]!.upDay;
     expect(up).not.toBeNull();
-    run(g, day0 + 30, 5, { frostOn: [day0 + 32] }, keepWatered);
+    run(g, day0 + 40, 5, { frostOn: [day0 + 42] }, keepWatered);
     expect(g.slots[0]!.dead).toBe("killed by frost");
   });
   it("perennials from seed don't flower their first year, but do the next", () => {
